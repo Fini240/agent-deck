@@ -185,6 +185,7 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
     }.stateIn(viewModelScope, SharingStarted.Eagerly, _settings.value)
 
     fun refreshSettingsScreen() {
+        graph.updates.check()
         graph.push.setPermissionGranted(graph.notifier.canPost())
         _settings.update {
             it.copy(

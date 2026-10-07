@@ -28,3 +28,6 @@ UI lives in `app/src/main/kotlin/de/finn/agentdeck/ui/` as stateless composables
 `*Ui` data classes, so screens can be changed and previewed/screenshot-tested without a server.
 Theme tokens: `ui/theme/Theme.kt`. Two-pane breakpoint: `TwoPaneMinWidth` in `ui/AppRoot.kt`.
 `tools/make_push_fixture.py` regenerates the shared encryption vectors (same file as `server/tests/fixtures/push-fixture.json`).
+
+## Direct APK updates
+Version 0.2.1 adds Settings → App updates, measured download progress and verified self-update requests to Android's installer. See [update setup and release delivery](../docs/APP-UPDATES.md). Keep the signing key stable and increment versionCode for each distributed APK.

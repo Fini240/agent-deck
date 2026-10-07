@@ -75,6 +75,7 @@ data class SettingsUi(
     val settingsSaving: Boolean = false,
     val settingsMessage: String? = null,
     val appVersion: String = "",
+    val update: de.finn.agentdeck.update.UpdateUi = de.finn.agentdeck.update.UpdateUi(),
 )
 
 data class SettingsActions(
@@ -88,6 +89,9 @@ data class SettingsActions(
     val onSaveSettings: (SettingsPatch) -> Unit = {},
     val onRePair: () -> Unit = {},
     val onForget: () -> Unit = {},
+    val onCheckUpdate: () -> Unit = {},
+    val onDownloadUpdate: () -> Unit = {},
+    val onInstallUpdate: () -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,6 +106,8 @@ fun SettingsScreen(ui: SettingsUi, actions: SettingsActions, modifier: Modifier 
         )
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp)) {
+                AppUpdateSection(ui.update, ui.appVersion, actions, paired = ui.serverUrl.isNotBlank())
+                HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 ConnectionSection(ui, actions, onForget = { confirmForget = true })
                 HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 NotificationSection(ui, actions)

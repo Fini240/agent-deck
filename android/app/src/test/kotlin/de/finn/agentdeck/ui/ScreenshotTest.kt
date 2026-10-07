@@ -69,6 +69,19 @@ class ScreenshotTest {
         compose.onRoot().captureRoboImage(File(outDir, "${name}_${width.label}_${if (dark) "dark" else "light"}.png").path)
     }
 
+    @Test fun updateAvailableCover() = shot("update_available", Width.COVER, false) {
+        SettingsScreen(SettingsUi(appVersion = "0.2.1", serverUrl = "https://example.test", update = de.finn.agentdeck.update.UpdateUi(de.finn.agentdeck.update.UpdatePhase.AVAILABLE, de.finn.agentdeck.core.api.ApkOffer(true, "0.2.2", 15000000, "a".repeat(64), "/apk"))), SettingsActions())
+    }
+    @Test fun updateProgressInnerDark() = shot("update_progress", Width.INNER, true) {
+        SettingsScreen(SettingsUi(appVersion = "0.2.1", serverUrl = "https://example.test", update = de.finn.agentdeck.update.UpdateUi(de.finn.agentdeck.update.UpdatePhase.DOWNLOADING, de.finn.agentdeck.core.api.ApkOffer(true, "0.2.2", 15000000, "a".repeat(64), "/apk"), 7500000)), SettingsActions())
+    }
+    @Test fun updateReadyWide() = shot("update_ready", Width.WIDE, false) {
+        SettingsScreen(SettingsUi(appVersion = "0.2.1", serverUrl = "https://example.test", update = de.finn.agentdeck.update.UpdateUi(de.finn.agentdeck.update.UpdatePhase.READY, de.finn.agentdeck.core.api.ApkOffer(true, "0.2.2", 15000000, "a".repeat(64), "/apk"))), SettingsActions())
+    }
+    @Test fun updateErrorCoverLargeText() = shot("update_error", Width.COVER, true, fontScale = 2f) {
+        SettingsScreen(SettingsUi(appVersion = "0.2.1", serverUrl = "https://example.test", update = de.finn.agentdeck.update.UpdateUi(de.finn.agentdeck.update.UpdatePhase.ERROR, message = "Could not reach your Mac. Keep Tailscale connected and retry.")), SettingsActions())
+    }
+
     enum class Width(val label: String, val size: String, val dpi: String) {
         COVER("cover390", "w390dp-h844dp", "xhdpi"),
         INNER("inner768", "w768dp-h900dp", "hdpi"),

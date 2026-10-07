@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -74,10 +76,12 @@ fun AdaptiveHome(
 }
 
 @Composable
-fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPermission: () -> Unit, onOpenNotificationSettings: () -> Unit) {
+fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPermission: () -> Unit, onOpenNotificationSettings: () -> Unit, onInstallUpdate: () -> Unit = {}) {
     val nav by vm.nav.collectAsStateWithLifecycle()
+    val update by graph.updates.state.collectAsStateWithLifecycle()
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
         val wide = maxWidth >= TwoPaneMinWidth
+        val windowWidth = maxWidth
         BackHandler(enabled = nav.screen != Screen.HOME || (!wide && nav.selectedId != null)) { vm.back(wide) }
         when (nav.screen) {
             Screen.PAIRING -> {
@@ -87,8 +91,9 @@ fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPer
             Screen.SETTINGS -> {
                 val ui by vm.settings.collectAsStateWithLifecycle()
                 SettingsScreen(
-                    ui,
+                    ui.copy(update = update),
                     SettingsActions(
+                        onCheckUpdate = { graph.updates.check(force = true) }, onDownloadUpdate = graph.updates::download, onInstallUpdate = onInstallUpdate,
                         onBack = { vm.back(wide) }, onRefreshStatus = vm::refreshSettingsScreen, onRequestPermission = onRequestPermission,
                         onOpenNotificationSettings = onOpenNotificationSettings, onLocalTest = vm::localTest, onPushTest = vm::pushTest,
                         onRegisterPush = vm::registerPush, onSaveSettings = vm::saveSettings, onRePair = { vm.open(Screen.PAIRING) }, onForget = vm::forget,
@@ -107,18 +112,27 @@ fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPer
             }
             Screen.HOME -> {
                 val list by vm.list.collectAsStateWithLifecycle()
-                AdaptiveHome(
-                    wide = wide, totalWidth = maxWidth, showDetail = nav.selectedId != null,
-                    list = {
-                        SessionListPane(
-                            list, onFilter = vm::setFilter, onActivity = vm::setActivity, onToggleExpand = vm::toggleExpanded,
-                            onSelect = { vm.select(it) }, onRefresh = { vm.refresh() }, onNew = { vm.open(Screen.NEW_SESSION) },
-                            onSettings = { vm.open(Screen.SETTINGS) }, onRePair = { vm.open(Screen.PAIRING) },
-                            onScope = vm::setScope, onQuery = vm::setQuery, onToggleFolder = vm::toggleFolder, onClearFilters = vm::clearFilters,
+                Column(Modifier.fillMaxSize()) {
+                    if (update.updateAvailable) {
+                        TextButton(onClick = { vm.open(Screen.SETTINGS) }, modifier = Modifier) {
+                            Text("App update ${update.offer?.version.orEmpty()} available · View update")
+                        }
+                    }
+                    Box(Modifier.weight(1f)) {
+                        AdaptiveHome(
+                            wide = wide, totalWidth = windowWidth, showDetail = nav.selectedId != null,
+                            list = {
+                                SessionListPane(
+                                    list, onFilter = vm::setFilter, onActivity = vm::setActivity, onToggleExpand = vm::toggleExpanded,
+                                    onSelect = { vm.select(it) }, onRefresh = { vm.refresh() }, onNew = { vm.open(Screen.NEW_SESSION) },
+                                    onSettings = { vm.open(Screen.SETTINGS) }, onRePair = { vm.open(Screen.PAIRING) },
+                                    onScope = vm::setScope, onQuery = vm::setQuery, onToggleFolder = vm::toggleFolder, onClearFilters = vm::clearFilters,
+                                )
+                            },
+                            detail = { nav.selectedId?.let { DetailRoute(graph, it, if (wide) null else ({ vm.back(wide) }), onOpen = { id -> vm.select(id) }) } },
                         )
-                    },
-                    detail = { nav.selectedId?.let { DetailRoute(graph, it, if (wide) null else ({ vm.back(wide) }), onOpen = { id -> vm.select(id) }) } },
-                )
+                    }
+                }
             }
         }
     }

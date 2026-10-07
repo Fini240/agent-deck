@@ -1,0 +1,17 @@
+# In-app updates
+
+Install version 0.2.1 once from the private dashboard. After that use **Settings → App updates → Download update → Install update**. A newer version also appears as a compact home-screen notice. The Mac and Tailscale connection must be available. Foreground/Settings checks are limited to once per hour; Check for updates always checks immediately. Downloads and installation start only after a tap.
+
+On the first installation from Agent Deck, Android may open **Allow from this source**. Grant it and return; the same verified download opens in Android's installer. Confirm the update there. Cancelling keeps the verified download ready for another attempt. Opening the installer is not reported as successful installation. The app's installed version after relaunch confirms what is running. No phone or emulator installation has yet been verified.
+
+APK metadata uses the paired HTTPS Mac's `/web/apk-info`; bytes come only from its fixed `/apk` route, without device tokens. Redirects are refused. Downloads use private cache storage and verify a bounded reported size and SHA-256, then the app package, greater Android versionCode and matching installed signing certificates. The cache is checked again before installer access. Pairing changes invalidate pending work and downloads. Failed or incomplete files are deleted. Rotation retains app-scoped progress; a killed process requires a fresh check/download. Existing pairing and drafts remain in their existing stores.
+
+## Delivering later releases
+
+Increase both Android `versionCode` and three-part `versionName` in `android/app/build.gradle.kts`. Build with the owner's Firebase configuration and the **same signing key** as the installed app. Never publish a push-unconfigured test APK or unsigned release. Copy the signed APK as `agent-deck-<version>.apk` into the helper's configured APK directory (`apkDir` in its server configuration; default `outputs`; an installed helper may use `outputs/download`). Replace it atomically. The running dashboard discovers the new file without a restart. Verify `/web/apk-info` shows its version and hash, then download `/apk` and compare SHA-256 to the build before announcing availability. Always perform this delivery step for future versions so installed clients can find them.
+
+The current private distribution uses a debug signing key. A release signing-key migration needs a planned compatible transition; a differently signed APK is deliberately rejected. A future Google Play distribution should remove the sideload installer permission/provider and use Play's update delivery. This sideload path is for the current direct APK distribution.
+
+Implementation: `core/api/ApkUpdates.kt` handles metadata and bounded downloads; `app/update/AppUpdates.kt` owns state and validation; `UpdateInstaller.kt` and MainActivity launch system permission/installation screens. Settings components expose testable UI state. No billing or third-party update service is involved.
+
+Android references: [package install permission](https://developer.android.com/reference/android/content/pm/PackageManager#canRequestPackageInstalls()), [per-app source settings](https://developer.android.com/reference/android/provider/Settings#ACTION_MANAGE_UNKNOWN_APP_SOURCES), [FileProvider](https://developer.android.com/reference/androidx/core/content/FileProvider).

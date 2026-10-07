@@ -28,6 +28,7 @@ class AppGraph(
     val push: PushRegistrar,
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 ) {
+    val updates = de.finn.agentdeck.update.AppUpdates(context, credentials, scope)
     val repository = AgentDeckRepository(credentials.credentials, scope)
     val notificationGate = NotificationGate(store = PrefsGateStore(context.getSharedPreferences("notification_gate", Context.MODE_PRIVATE)))
     val notifier = Notifier(context)
@@ -37,6 +38,7 @@ class AppGraph(
 
     fun onForeground() {
         foreground = true
+        updates.check()
         push.setPermissionGranted(notifier.canPost())
         repository.startLive()
         registerPushIfPaired()
@@ -61,6 +63,7 @@ class AppGraph(
     fun onPaired() {
         // Notifications of a previous pairing would offer replies through the wrong device.
         notifier.cancelAll()
+        updates.check()
         repository.onCredentialsChanged(foreground)
         registerPushIfPaired()
     }

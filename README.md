@@ -11,6 +11,7 @@ A native Android app and mobile web dashboard for checking and steering Claude C
 - Android encrypted FCM notifications: silent activity/progress updates, completion/error/input alerts and direct notification replies.
 - Real progress totals when available; an activity indicator when no percentage is known.
 - A browser dashboard with a signed APK download button, usable before browser pairing.
+- In-app APK updates from the paired Mac: check, verified download progress and Android installation confirmation.
 - Native Compose layouts for phone and larger screens, with editable source throughout.
 
 Agent Deck uses your installed terminal CLIs and their normal authentication. It does not require provider API keys. Existing unmanaged chats are inspectable; controls require a managed session. Active unmanaged chats are never silently cloned. Child agents are inspectable and steered through their parent.
@@ -65,7 +66,7 @@ The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk`. To make it
 
 ```sh
 mkdir -p outputs
-cp android/app/build/outputs/apk/debug/app-debug.apk outputs/agent-deck-0.1.1.apk
+cp android/app/build/outputs/apk/debug/app-debug.apk outputs/agent-deck-0.2.1.apk
 ```
 
 Run those copy commands from the repository root. `/apk` excludes unsigned and push-unconfigured builds. Release builds are unsigned until you configure your own signing key.
@@ -106,3 +107,5 @@ cd android
 ```
 
 Private device state, service-account credentials, signing keys, generated builds, chat data and internal coordination/history are not part of this repository.
+
+APK update setup and future release delivery: [In-app updates](docs/APP-UPDATES.md).

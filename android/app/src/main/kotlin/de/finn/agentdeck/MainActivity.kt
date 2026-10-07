@@ -12,6 +12,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.lifecycleScope
+import de.finn.agentdeck.update.UpdateInstaller
+import kotlinx.coroutines.launch
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -28,19 +31,64 @@ class MainActivity : ComponentActivity() {
     }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { vm.onPermissionResult() }
+    private var awaitingInstallPermission = false
+    private var permissionFileName: String? = null
+    private var installing = false
+    private val installPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (awaitingInstallPermission) {
+            awaitingInstallPermission = false
+            if (packageManager.canRequestPackageInstalls()) installUpdate(permissionFileName)
+            else graph.updates.installerMessage("Installation permission was not granted. Tap Install update when you're ready to allow it.")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        awaitingInstallPermission = savedInstanceState?.getBoolean("awaitingInstallPermission") ?: false
+        permissionFileName = savedInstanceState?.getString("permissionFileName")
         setContent {
             AgentDeckTheme {
-                AppRoot(graph, vm, onScan = ::scanQr, onRequestPermission = ::requestNotificationPermission, onOpenNotificationSettings = ::openNotificationSettings)
+                AppRoot(graph, vm, onScan = ::scanQr, onRequestPermission = ::requestNotificationPermission, onOpenNotificationSettings = ::openNotificationSettings, onInstallUpdate = { installUpdate() })
             }
         }
         if (savedInstanceState == null) {
             handleIntent(intent)
             // Ask once on first launch after pairing, Android 13+ only.
             if (graph.credentials.current() != null && !graph.notifier.canPost()) requestNotificationPermission()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("awaitingInstallPermission", awaitingInstallPermission)
+        outState.putString("permissionFileName", permissionFileName)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun installUpdate(expectedFileName: String? = null) {
+        if (installing || awaitingInstallPermission) return
+        installing = true
+        lifecycleScope.launch {
+            try {
+                val file = graph.updates.installFile() ?: return@launch
+                if (expectedFileName != null && file.name != expectedFileName) {
+                    graph.updates.installerMessage("The download changed while Android settings were open. Tap Install update for this download.")
+                    return@launch
+                }
+                if (!packageManager.canRequestPackageInstalls()) {
+                    awaitingInstallPermission = true
+                    permissionFileName = file.name
+                    graph.updates.installerMessage("Allow Agent Deck to install apps on the next screen. Your verified download is saved.")
+                    installPermission.launch(UpdateInstaller.permissionIntent(this@MainActivity))
+                } else {
+                    startActivity(UpdateInstaller.installIntent(this@MainActivity, file))
+                    graph.updates.installerMessage("Android's installer is open. Confirm the update there, or tap Install update again if you cancelled.")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) {
+                awaitingInstallPermission = false
+                graph.updates.installerMessage("Android could not open the installer. Tap Install update to retry.")
+            } finally { installing = false }
         }
     }
 
