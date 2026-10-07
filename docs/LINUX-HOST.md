@@ -13,6 +13,10 @@ docker exec -it agentdeck codex login --device-auth
 docker exec -it agentdeck claude auth login --claudeai
 ```
 
+New installations seed `home/.codex/config.toml` with `sandbox_mode = "danger-full-access"`, `approval_policy = "on-request"`, and trusted `/workspace`. Docker remains the isolation boundary: non-root user, dropped capabilities, no privilege escalation, and only the dedicated home/workspace mounts. Codex can run commands, edit its writable files and use the network inside that container. It cannot thereby administer the host or other containers. The mode removes Codex's inner filesystem/network boundaries; `on-request` is not a per-command confirmation guarantee.
+
+Codex's default inner Linux sandbox can fail here with `bwrap: No permissions to create a new namespace`, even for `pwd`. Do not make the container privileged to fix this. The installer preserves an existing Codex configuration, so older installations need the two top-level settings above added to their dedicated config (before any TOML table), preserving other preferences. New chats pick up the change. For an already-open managed chat, enter `/permissions`, select **Full Access**, and confirm; that selection also disables approval prompts for that session. Alternatively resume the conversation with the updated configuration. These settings apply only to this Docker deployment; normal Mac Codex permissions stay as configured.
+
 Do not mount another running agent's refreshing auth.json into this container. Secrets belong only in the private persistent home or runtime.env, never the source checkout. For encrypted push, supply the same Firebase project's service account as `home/.agent-deck/firebase-service-account.json` (0600) and the same push-enabled signed Android APK in `downloads`.
 
 Create a fresh pairing code with `docker exec agentdeck agentdeck-admin pair`. On the phone use the device switcher, **Add device**, and scan the QR or enter the URL and code. The earlier Mac pairing stays saved. Pairing codes expire after five minutes. If access to either helper is offline, its tasks and saved drafts remain on that host while the other can be used.
