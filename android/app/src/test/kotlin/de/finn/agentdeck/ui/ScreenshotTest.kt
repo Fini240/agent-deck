@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -57,8 +58,9 @@ class ScreenshotTest {
 
     private val outDir = File(System.getProperty("user.dir"), "../../outputs/screenshots/android").canonicalFile
 
-    private fun shot(name: String, width: Width, dark: Boolean, fontScale: Float = 1f, content: @Composable () -> Unit) {
+    private fun shot(name: String, width: Width, dark: Boolean, fontScale: Float = 1f, dialog: Boolean = false, content: @Composable () -> Unit) {
         RuntimeEnvironment.setQualifiers("${width.size}-${if (dark) "night" else "notnight"}-${width.dpi}")
+        RuntimeEnvironment.setFontScale(fontScale)
         compose.setContent {
             AgentDeckTheme(darkTheme = dark) {
                 CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
@@ -66,7 +68,7 @@ class ScreenshotTest {
                 }
             }
         }
-        compose.onRoot().captureRoboImage(File(outDir, "${name}_${width.label}_${if (dark) "dark" else "light"}.png").path)
+        (if (dialog) compose.onNode(isDialog()) else compose.onRoot()).captureRoboImage(File(outDir, "${name}_${width.label}_${if (dark) "dark" else "light"}.png").path)
     }
 
     @Test fun updateAvailableCover() = shot("update_available", Width.COVER, false) {
@@ -80,6 +82,20 @@ class ScreenshotTest {
     }
     @Test fun updateErrorCoverLargeText() = shot("update_error", Width.COVER, true, fontScale = 2f) {
         SettingsScreen(SettingsUi(appVersion = "0.2.1", serverUrl = "https://example.test", update = de.finn.agentdeck.update.UpdateUi(de.finn.agentdeck.update.UpdatePhase.ERROR, message = "Could not reach your Mac. Keep Tailscale connected and retry.")), SettingsActions())
+    }
+
+    private val promptOffer = de.finn.agentdeck.core.api.ApkOffer(true, "0.2.3", 15000000, "a".repeat(64), "/apk")
+    @Test fun updatePopupCover() = shot("update_popup", Width.COVER, false, dialog = true) {
+        de.finn.agentdeck.ui.settings.UpdatePrompt(de.finn.agentdeck.update.UpdateUi(de.finn.agentdeck.update.UpdatePhase.AVAILABLE, promptOffer), {}, {})
+    }
+    @Test fun updatePopupInnerDark() = shot("update_popup", Width.INNER, true, dialog = true) {
+        de.finn.agentdeck.ui.settings.UpdatePrompt(de.finn.agentdeck.update.UpdateUi(de.finn.agentdeck.update.UpdatePhase.AVAILABLE, promptOffer), {}, {})
+    }
+    @Test fun updatePopupWide() = shot("update_popup", Width.WIDE, false, dialog = true) {
+        de.finn.agentdeck.ui.settings.UpdatePrompt(de.finn.agentdeck.update.UpdateUi(de.finn.agentdeck.update.UpdatePhase.READY, promptOffer), {}, {})
+    }
+    @Test fun updatePopupLargeText() = shot("update_popup_large", Width.COVER, true, fontScale = 2f, dialog = true) {
+        de.finn.agentdeck.ui.settings.UpdatePrompt(de.finn.agentdeck.update.UpdateUi(de.finn.agentdeck.update.UpdatePhase.AVAILABLE, promptOffer), {}, {})
     }
 
     enum class Width(val label: String, val size: String, val dpi: String) {

@@ -33,6 +33,7 @@ data class UpdateUi(
     val offer: ApkOffer? = null,
     val downloaded: Long = 0,
     val message: String? = null,
+    val showPrompt: Boolean = false,
 ) {
     val busy get() = phase == UpdatePhase.CHECKING || phase == UpdatePhase.DOWNLOADING
     val updateAvailable get() = phase in setOf(UpdatePhase.AVAILABLE, UpdatePhase.DOWNLOADING, UpdatePhase.READY) || (phase == UpdatePhase.ERROR && offer != null)
@@ -54,6 +55,8 @@ class AppUpdates(
     private var job: Job? = null
     private var ready: File? = null
     private var lastCheck: Long? = null
+    private var foreground = false
+    private var promptHandled = false
     private val directory = File(context.cacheDir, "updates").apply { mkdirs() }
 
     init {
@@ -71,11 +74,34 @@ class AppUpdates(
             job?.cancel()
             ready?.delete(); ready = null
             lastCheck = null
+            promptHandled = false
             _state.value = UpdateUi()
         }
     }
 
     private fun valid(expected: Credentials) = credentials.current() == expected && identity == expected
+
+    /** Fresh check per app opening; a ready download is retained instead of fetched again. */
+    fun onAppOpened() {
+        syncIdentity()
+        foreground = true
+        promptHandled = false
+        if (_state.value.phase == UpdatePhase.READY) _state.value = withPrompt(_state.value)
+        else check(force = true)
+    }
+
+    fun onAppClosed() {
+        foreground = false
+        _state.update { it.copy(showPrompt = false) }
+    }
+
+    fun dismissPrompt() {
+        promptHandled = true
+        _state.update { it.copy(showPrompt = false) }
+    }
+
+    private fun withPrompt(ui: UpdateUi) = ui.copy(showPrompt = foreground && !promptHandled &&
+        ui.offer != null && ui.phase in setOf(UpdatePhase.AVAILABLE, UpdatePhase.READY))
 
     fun check(force: Boolean = false) {
         syncIdentity()
@@ -94,7 +120,7 @@ class AppUpdates(
                     AppVersion.parse(offer.version)!! > AppVersion.parse(BuildConfig.VERSION_NAME)!! -> UpdatePhase.AVAILABLE
                     else -> UpdatePhase.CURRENT
                 }
-                _state.value = UpdateUi(phase, offer.takeIf { phase == UpdatePhase.AVAILABLE })
+                _state.value = withPrompt(UpdateUi(phase, offer.takeIf { phase == UpdatePhase.AVAILABLE }))
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if (valid(expected)) _state.value = UpdateUi(UpdatePhase.ERROR, message = e.message ?: "Could not check for updates. Keep Tailscale connected and retry.")
@@ -107,6 +133,7 @@ class AppUpdates(
         val expected = identity ?: return
         val offer = _state.value.offer ?: return
         if (_state.value.busy || ready != null) return
+        dismissPrompt()
         _state.value = UpdateUi(UpdatePhase.DOWNLOADING, offer)
         job = scope.launch {
             val partial = File(directory, "${UUID.randomUUID()}.part")
@@ -121,7 +148,7 @@ class AppUpdates(
                 artifact = File(directory, "${UUID.randomUUID()}.apk")
                 require(partial.renameTo(artifact)) { "Could not save the update. Retry the download." }
                 ready = artifact
-                _state.value = UpdateUi(UpdatePhase.READY, offer, offer.size!!)
+                _state.value = withPrompt(UpdateUi(UpdatePhase.READY, offer, offer.size!!))
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if (valid(expected)) _state.value = UpdateUi(UpdatePhase.ERROR, offer, message = e.message ?: "The update could not be downloaded. Retry.")

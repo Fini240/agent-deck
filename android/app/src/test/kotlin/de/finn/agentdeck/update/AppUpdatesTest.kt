@@ -145,4 +145,56 @@ class AppUpdatesTest {
             assertNull(updates.installFile()); assertTrue(File(context.cacheDir, "updates").listFiles().orEmpty().isEmpty())
         } finally { scope.cancel() }
     }
+    @Test fun popupAppearsOnOpenAndLaterSuppressesItUntilNextOpening() = runTest {
+        val source = Source(); val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        try {
+            val updates = AppUpdates(context, store(), scope, { source }, {}, { 1000L }, io = StandardTestDispatcher(testScheduler))
+            updates.onAppOpened(); runCurrent(); assertTrue(updates.state.value.showPrompt)
+            updates.dismissPrompt(); assertFalse(updates.state.value.showPrompt)
+            updates.check(force = true); runCurrent(); assertFalse(updates.state.value.showPrompt)
+            updates.onAppClosed(); updates.onAppOpened(); runCurrent(); assertTrue(updates.state.value.showPrompt)
+            assertEquals(3, source.checks) // Each new opening checks the latest available release.
+        } finally { scope.cancel() }
+    }
+    @Test fun backgroundResultWaitsForAppOpeningAndForgetClearsPopup() = runTest {
+        val source = Source(); val gate = CompletableDeferred<Unit>(); source.gate = gate
+        val s = store(); val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        try {
+            val updates = AppUpdates(context, s, scope, { source }, {}, { 1000L }, io = StandardTestDispatcher(testScheduler))
+            updates.onAppOpened(); runCurrent(); updates.onAppClosed(); gate.complete(Unit); runCurrent()
+            assertFalse(updates.state.value.showPrompt)
+            updates.onAppOpened(); runCurrent(); assertTrue(updates.state.value.showPrompt)
+            s.clear(); runCurrent(); assertFalse(updates.state.value.showPrompt)
+        } finally { scope.cancel() }
+    }
+    @Test fun updateNowSuppressesPopupDuringDownloadAndReadyState() = runTest {
+        val source = Source(); val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        try {
+            val updates = AppUpdates(context, store(), scope, { source }, {}, { 1000L }, io = StandardTestDispatcher(testScheduler))
+            updates.onAppOpened(); runCurrent(); assertTrue(updates.state.value.showPrompt)
+            updates.download()
+            withTimeout(5000) { updates.state.first { it.phase == UpdatePhase.READY } }
+            assertFalse(updates.state.value.showPrompt)
+            updates.onAppClosed(); updates.onAppOpened(); assertTrue(updates.state.value.showPrompt)
+        } finally { scope.cancel() }
+    }
+    @Test fun noUpdateOrCheckFailureDoesNotShowPopup() = runTest {
+        val source = Source().apply { offers = offer.copy(version = "0.1.0") }
+        val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        try {
+            val updates = AppUpdates(context, store(), scope, { source }, {}, io = StandardTestDispatcher(testScheduler))
+            updates.onAppOpened(); runCurrent(); assertFalse(updates.state.value.showPrompt)
+            source.failure = true; updates.check(force = true); runCurrent(); assertFalse(updates.state.value.showPrompt)
+        } finally { scope.cancel() }
+    }
+    @Test fun reopeningFindsANewReleaseEvenWithinTheOldCacheWindow() = runTest {
+        val source = Source().apply { offers = offer.copy(version = "0.1.0") }
+        val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        try {
+            val updates = AppUpdates(context, store(), scope, { source }, {}, { 1000L }, io = StandardTestDispatcher(testScheduler))
+            updates.onAppOpened(); runCurrent(); assertFalse(updates.state.value.showPrompt)
+            source.offers = offer; updates.onAppClosed(); updates.onAppOpened(); runCurrent()
+            assertTrue(updates.state.value.showPrompt); assertEquals(2, source.checks)
+        } finally { scope.cancel() }
+    }
 }

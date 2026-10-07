@@ -36,6 +36,8 @@ import de.finn.agentdeck.ui.pairing.PairingScreen
 import de.finn.agentdeck.ui.sessions.SessionListPane
 import de.finn.agentdeck.ui.settings.SettingsActions
 import de.finn.agentdeck.ui.settings.SettingsScreen
+import de.finn.agentdeck.ui.settings.UpdatePrompt
+import de.finn.agentdeck.update.UpdatePhase
 
 /** Width at which the Fold's inner screen (and tablets) switch to list + detail side by side. */
 val TwoPaneMinWidth: Dp = 600.dp
@@ -135,6 +137,13 @@ fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPer
                 }
             }
         }
+    }
+    if (nav.screen == Screen.HOME && update.showPrompt) {
+        UpdatePrompt(update, onLater = graph.updates::dismissPrompt, onUpdateNow = {
+            graph.updates.dismissPrompt()
+            vm.open(Screen.SETTINGS)
+            if (update.phase == UpdatePhase.READY) onInstallUpdate() else graph.updates.download()
+        })
     }
 }
 

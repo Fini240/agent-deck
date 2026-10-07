@@ -38,7 +38,7 @@ class AppGraph(
 
     fun onForeground() {
         foreground = true
-        updates.check()
+        updates.onAppOpened()
         push.setPermissionGranted(notifier.canPost())
         repository.startLive()
         registerPushIfPaired()
@@ -46,6 +46,7 @@ class AppGraph(
 
     fun onBackground() {
         foreground = false
+        updates.onAppClosed()
         repository.stopLive()
     }
 

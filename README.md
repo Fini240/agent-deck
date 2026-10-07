@@ -66,7 +66,7 @@ The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk`. To make it
 
 ```sh
 mkdir -p outputs
-cp android/app/build/outputs/apk/debug/app-debug.apk outputs/agent-deck-0.2.1.apk
+cp android/app/build/outputs/apk/debug/app-debug.apk outputs/agent-deck-0.2.2.apk
 ```
 
 Run those copy commands from the repository root. `/apk` excludes unsigned and push-unconfigured builds. Release builds are unsigned until you configure your own signing key.
