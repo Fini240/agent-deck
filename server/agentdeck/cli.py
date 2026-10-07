@@ -554,6 +554,7 @@ def shell_block(python: str, src: str, claude_bin: str, codex_bin: str) -> str:
         f"  _agentdeck_py={q(python)}",
         f"  _agentdeck_src={q(src)}",
         '  agentdeck() { PYTHONPATH="$_agentdeck_src" "$_agentdeck_py" -m agentdeck.cli "$@"; }',
+        '  ad() { if (( $# )); then agentdeck "$@"; else agentdeck attach; fi; }',
         *fn,
         "fi",
         MARK_END,
