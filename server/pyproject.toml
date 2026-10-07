@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentdeck"
+dynamic = ["version"]
+description = "Agent Deck Mac helper: private phone control for terminal AI agents"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "cryptography>=43",
+  "google-auth>=2.30",
+  "requests>=2.32",
+  "segno>=1.6",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "httpx>=0.27"]
+
+[project.scripts]
+agentdeck-server = "agentdeck.__main__:main"
+agentdeck-admin = "agentdeck.admin:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "agentdeck.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["agentdeck*"]
+
+[tool.setuptools.package-data]
+agentdeck = ["web_static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

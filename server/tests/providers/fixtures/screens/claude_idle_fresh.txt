@@ -1,0 +1,11 @@
+ ▐▛███▛█   Claude Code v2.1.290
+▝▜██████▀  Haiku 4.5 · Claude Pro
+ ▝▝   ▝▝   /Users/example
+
+                     tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "fix lint errors"
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Haiku 4.5
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

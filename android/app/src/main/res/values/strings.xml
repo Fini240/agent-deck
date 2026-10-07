@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Agent Deck</string>
+    <string name="channel_progress">Agent progress</string>
+    <string name="channel_progress_desc">Silent, ongoing updates while an agent works. Shows real progress when the Mac reports it.</string>
+    <string name="channel_results">Finished or failed</string>
+    <string name="channel_results_desc">Rings when an agent finishes or stops with an error.</string>
+    <string name="channel_input">Needs your input</string>
+    <string name="channel_input_desc">Rings when an agent asks a question or needs permission. Opens the app.</string>
+    <string name="channel_replies">Reply status</string>
+    <string name="channel_replies_desc">Confirms replies sent from a notification, or tells you if one was not delivered.</string>
+</resources>

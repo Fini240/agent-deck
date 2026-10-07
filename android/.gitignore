@@ -1,0 +1,13 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+# Real Firebase config is supplied by the coordinator and stays out of source control.
+app/google-services.json
+# Release signing material never lives in the repo.
+*.jks
+*.keystore
+keystore.properties

@@ -1,0 +1,37 @@
+{
+  "keyBase64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "cases": [
+    {
+      "name": "progress-determinate",
+      "data": {
+        "v": "1",
+        "nonce": "AAECAwQFBgcICQoL",
+        "ciphertext": "PCCzbaCLtlLpY62p1J8MQLPmtwXSV30IQReApydLcMBud9yZ3LIwtFbXGp777kdWpz1Ct3iljrlT9l99fc7EzNweshOnvUNDJnbpAo76ao0YyaYGE0M6G92K8b4Tmdfq6dR7hMslsTikPmzHJhtIEd1HFs6QsVa4Yd02queIGiyBcGOq1aKvNirNatVUtymxQpWORRcrsXi8bd5ay+LE3qXDrCTTz/xEl1OH2POi9snyqbhH+NhRhh79o7IDt9KdZ26wySH/oqZDN7/EgHDpqMMLlh9JIoDTBfTpszJq8tZhUKDOgUUhH3AT3XvBeBI2iu7RuMqDgRYVFjSAIJjD7REN"
+      },
+      "plaintext": "{\"eventId\":\"evt-0001\",\"type\":\"progress\",\"sessionId\":\"s-claude-1\",\"title\":\"Claude Code is working\",\"body\":\"Running tests\",\"agent\":\"claude\",\"timestamp\":\"2026-10-06T21:00:00Z\",\"progress\":{\"current\":3,\"total\":10,\"unit\":\"tests\"},\"stage\":\"Testing\"}"
+    },
+    {
+      "name": "progress-unknown",
+      "data": {
+        "v": "1",
+        "nonce": "DA0ODxAREhMUFRYX",
+        "ciphertext": "49wMrhoYiBpTCHL39P1SymUz3dzUURne4tKfwt6CsIhDkBhAkrYETT2AayGdxXW0xTKZ64uHOdAhmx8kl9xolDleKb+d1/5r1zvYHyV0KuFJCLsoI71pWPEP4+l8y0Hil5n8oVNFLsUF4ULLjr5AlRFKEliQEU4dAJPmtkGcg0tRk8lHVSPjVXStNY1trT5J5vxmaf2h7HMbljytbtL8Y09UbbTgDQet3OfjA8LLwPgfC96uC9pKvGAbTY6vs8cKw8cjyhs2OEyzLT2vQiQwZeoTSCOhphyHMZQu0Pc7556B"
+      },
+      "plaintext": "{\"eventId\":\"evt-0002\",\"type\":\"progress\",\"sessionId\":\"s-codex-1\",\"title\":\"Codex is working\",\"body\":\"Installing dependencies\",\"agent\":\"codex\",\"timestamp\":\"2026-10-06T21:00:05Z\",\"progress\":null,\"stage\":\"Install\"}"
+    },
+    {
+      "name": "completed-unicode",
+      "data": {
+        "v": "1",
+        "nonce": "GBkaGxwdHh8gISIj",
+        "ciphertext": "aD0lZr4nEQZlIYfrNq20YyDJynW5ftdwGgdForYdoQUfH0K+1+1A/orTmkbWrCK6k36KdOJOeIEYUgHkyVqbBBzmtSNIgAEKgTXcFRfhFR0btjcHVyBfFH2/tWI03HUxjGdJhNuSi8nBC4XzBHb7BCljJR1xg+c01D0kTffvL4OXFSwwmO2J3Gt4kQLVepmgZgHR8hbCCgImT3zd9x/BnGSRQfd71D8JmD5i+wD5mPEuEWSpNJemPhZ6Rc8Iq8+X4sepNujWZZODHsc20kFULPoxlArKX88H+ywEoQ=="
+      },
+      "plaintext": "{\"eventId\":\"evt-0003\",\"type\":\"completed\",\"sessionId\":\"s-claude-1\",\"title\":\"Fertig ✓\",\"body\":\"Alle Tests grün – 10/10\",\"agent\":\"claude\",\"timestamp\":\"2026-10-06T21:01:00Z\",\"progress\":null,\"stage\":null}"
+    }
+  ],
+  "tampered": {
+    "v": "1",
+    "nonce": "AAECAwQFBgcICQoL",
+    "ciphertext": "PSCzbaCLtlLpY62p1J8MQLPmtwXSV30IQReApydLcMBud9yZ3LIwtFbXGp777kdWpz1Ct3iljrlT9l99fc7EzNweshOnvUNDJnbpAo76ao0YyaYGE0M6G92K8b4Tmdfq6dR7hMslsTikPmzHJhtIEd1HFs6QsVa4Yd02queIGiyBcGOq1aKvNirNatVUtymxQpWORRcrsXi8bd5ay+LE3qXDrCTTz/xEl1OH2POi9snyqbhH+NhRhh79o7IDt9KdZ26wySH/oqZDN7/EgHDpqMMLlh9JIoDTBfTpszJq8tZhUKDOgUUhH3AT3XvBeBI2iu7RuMqDgRYVFjSAIJjD7REN"
+  }
+}

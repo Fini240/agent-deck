@@ -1,0 +1,17 @@
+❯ Use the Write tool to create /tmp/adprobe/smoke/a.txt containing the word hi.
+
+⏺ Write(/tmp/adprobe/smoke/a.txt)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file
+ ../../tmp/adprobe/smoke/a.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 hi
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create a.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session; Yes, and
+      always allow access to /tmp/adprobe/smoke, /private/tmp/adprobe/smoke for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

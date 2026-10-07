@@ -1,0 +1,14 @@
+❯ Use the Bash tool to run exactly: sleep 30 && echo agentdeck-smoke
+  Then tell me the output.
+
+  Ran 2 shell commands
+
+⏺ The command is running in the background. I'll wait for it to complete...
+
+✻ Churned for 9s · done 12:01 AM · 1 shell still running
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Haiku 4.5 | ctx: 78% remaining | 5h: 30% used  7d: 19% used
+  ⏸ manual mode on · 1 shell · ← for agents

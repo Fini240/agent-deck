@@ -1,0 +1,13 @@
+› delete the temp files
+
+  Would you like to run the following command?
+
+  Reason: remove generated files outside the workspace
+
+  $ rm -rf /tmp/agentdeck-test-output
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for this command (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

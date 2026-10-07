@@ -1,0 +1,15 @@
+  >_ OpenAI Codex (v0.160.1)
+     /private/tmp/adprobe/trustdir
+  permissions: YOLO mode
+
+  To get started, describe a task or try one of these commands:
+
+  /init - create an AGENTS.md file with instructions for Codex
+  /status - show current session configuration
+
+⚠ Heads up, you have less than 25% of your 5h limit left. Run /status for a breakdown.
+
+› Ask Codex to do anything
+
+  Context 100% left · 5h 11% left · weekly 34% left · GPT-6.1-Sol high
+  ← for agents · ? for shortcuts                                                               ⚠ 1 warning · f2 to view

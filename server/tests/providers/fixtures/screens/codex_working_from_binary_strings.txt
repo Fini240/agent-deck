@@ -1,0 +1,11 @@
+› check in on my trading bots
+
+• Ran docker ps
+  └ CONTAINER ID   IMAGE
+
+• Working (12s • esc to interrupt)
+
+› Ask Codex to do anything
+
+  Context 91% left · 5h 11% left · weekly 34% left · GPT-6.1-Sol high
+  ← for agents · ? for shortcuts

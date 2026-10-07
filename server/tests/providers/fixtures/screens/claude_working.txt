@@ -1,0 +1,12 @@
+❯ Use the Write tool to create /tmp/adprobe/smoke/a.txt containing the word hi.
+
+✻ Ideating… (4s · thinking)
+  ⎿  Tip: Run /ultrareview for a cloud-based multi-agent review that finds and verifies bugs in your branch — 3 free
+     reviews left
+
+                                                                                ✔ Update installed · Restart to update
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Haiku 4.5 | ctx: 78% remaining | 5h: 30% used  7d: 19% used
+  ⏸ manual mode on · 1 shell · ← for agents

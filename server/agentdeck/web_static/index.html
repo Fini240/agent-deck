@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>Agent Deck</title>
+<link rel="icon" href="/web/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/web/static/app.css">
+<script src="/web/static/app.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-row">
+    <button id="backBtn" class="btn ghost back" type="button" hidden>Chats</button>
+    <a class="brand" href="/dashboard"><img src="/web/static/icon.svg" alt="" width="24" height="24"><span>Agent Deck</span></a>
+    <div class="top-actions">
+      <a id="apkTopLink" class="btn ghost wide-only" href="/apk" hidden>Android app</a>
+      <button id="newChatBtn" class="btn primary" type="button" hidden>New chat</button>
+      <button id="logoutBtn" class="btn ghost" type="button" hidden>Sign out</button>
+    </div>
+  </div>
+  <div id="syncStatus" class="sync" role="status" aria-live="polite" hidden></div>
+</header>
+
+<main id="main">
+  <section id="loadingView" class="state-view">
+    <p class="muted">Connecting to your Mac…</p>
+  </section>
+
+  <section id="offlineView" class="state-view" hidden>
+    <h1>Can’t reach Agent Deck</h1>
+    <p id="offlineText" class="muted">The Mac helper didn’t answer. Check that the Mac is awake and on your tailnet.</p>
+    <button id="offlineRetry" class="btn primary" type="button">Try again</button>
+  </section>
+
+  <section id="welcomeView" class="welcome" hidden>
+    <div id="welcomeNotice" class="notice warn" role="alert" hidden></div>
+    <div class="card apk-card">
+      <h2>Android app</h2>
+      <p class="muted">Install Agent Deck on your phone for notifications and direct replies. This link only works inside your private tailnet.</p>
+      <div id="apkInfo" class="apk-info"></div>
+    </div>
+    <form id="pairForm" class="card" autocomplete="off" novalidate>
+      <h2>Use this browser</h2>
+      <p class="muted">On the Mac, run <code>agentdeck pair</code> and enter the one-time code it shows.</p>
+      <label class="field">
+        <span>Pairing code</span>
+        <input id="pairCode" name="code" inputmode="text" autocapitalize="characters" spellcheck="false" maxlength="200" required>
+      </label>
+      <label class="field">
+        <span>Name for this browser <span class="muted">(optional)</span></span>
+        <input id="pairName" name="deviceName" maxlength="60" placeholder="e.g. Work laptop">
+      </label>
+      <p id="pairError" class="form-error" role="alert" hidden></p>
+      <button id="pairBtn" class="btn primary" type="submit">Pair browser</button>
+    </form>
+  </section>
+
+  <div id="dashView" class="dash" hidden>
+    <aside id="listPane" class="list-pane" aria-label="Chats">
+      <div class="filters">
+        <label class="sr-only" for="searchInput">Search chats</label>
+        <input id="searchInput" type="search" placeholder="Search chats, tasks, folders" autocomplete="off" spellcheck="false">
+        <div class="filter-row">
+          <div class="segmented" role="group" aria-label="Provider">
+            <button type="button" data-agent="all" aria-pressed="true">All</button>
+            <button type="button" data-agent="claude" aria-pressed="false">Claude</button>
+            <button type="button" data-agent="codex" aria-pressed="false">Codex</button>
+          </div>
+          <label class="sr-only" for="scopeSelect">Scope</label>
+          <select id="scopeSelect">
+            <option value="all">All chats</option>
+            <option value="active">Active</option>
+            <option value="managed">Managed</option>
+          </select>
+        </div>
+      </div>
+      <div id="sessionList" class="session-list"></div>
+      <div class="list-footer">
+        <a class="btn ghost" href="/apk">Download Android app</a>
+      </div>
+    </aside>
+
+    <section id="detailPane" class="detail-pane" aria-label="Chat detail">
+      <div id="detailEmpty" class="detail-empty">
+        <p class="muted">Select a chat to read its messages and activity.</p>
+        <div class="card apk-card">
+          <h2>Android app</h2>
+          <div id="apkInfoDash" class="apk-info"></div>
+        </div>
+      </div>
+      <div id="detail" class="detail" hidden>
+        <div id="detailScroll" class="detail-scroll">
+          <div id="detailHead" class="detail-head"></div>
+          <div id="detailNotice"></div>
+          <div id="detailChildren"></div>
+          <div id="detailApprovals"></div>
+          <div class="tabs" role="tablist">
+            <button id="tabMessages" type="button" role="tab" aria-selected="true">Messages</button>
+            <button id="tabTerminal" type="button" role="tab" aria-selected="false">Terminal</button>
+          </div>
+          <div id="detailError" class="notice warn" role="alert" hidden></div>
+          <div id="messages" class="messages" role="tabpanel" aria-labelledby="tabMessages"></div>
+          <div id="terminalPanel" class="terminal-panel" role="tabpanel" aria-labelledby="tabTerminal" hidden>
+            <pre id="terminalText" class="terminal"></pre>
+          </div>
+        </div>
+        <form id="composer" class="composer" novalidate hidden>
+          <div id="sendPending" class="notice warn" role="alert" hidden>
+            <p id="sendPendingText"></p>
+            <div class="row-actions">
+              <button id="sendRetry" class="btn primary" type="button">Retry same message</button>
+              <button id="sendDiscard" class="btn ghost" type="button">Discard</button>
+            </div>
+          </div>
+          <p id="composerNote" class="composer-note" role="status" hidden></p>
+          <label class="sr-only" for="composerText">Follow-up message</label>
+          <textarea id="composerText" rows="2" maxlength="32000" placeholder="Send a follow-up"></textarea>
+          <div class="composer-row">
+            <label id="interruptLabel" class="check">
+              <input id="interruptBox" type="checkbox" checked>
+              <span>Interrupt current turn</span>
+            </label>
+            <button id="sendBtn" class="btn primary" type="submit">Send</button>
+          </div>
+        </form>
+      </div>
+    </section>
+  </div>
+</main>
+
+<dialog id="newChatDialog" class="dialog" aria-labelledby="newChatTitle">
+  <form id="newChatForm" novalidate>
+    <h2 id="newChatTitle">New chat</h2>
+    <label class="field">
+      <span>Agent</span>
+      <select id="ncAgent"></select>
+    </label>
+    <div class="field">
+      <label for="ncModel">Model</label>
+      <div class="inline">
+        <select id="ncModel"></select>
+        <button id="ncRefreshModels" class="btn ghost" type="button">Refresh</button>
+      </div>
+      <input id="ncModelManual" placeholder="Model ID" spellcheck="false" autocapitalize="off" maxlength="128" hidden>
+      <p id="ncModelNote" class="muted small"></p>
+    </div>
+    <label class="field">
+      <span>Folder</span>
+      <select id="ncFolder"></select>
+    </label>
+    <input id="ncFolderManual" class="field-input" placeholder="/absolute/path/inside/an/allowed/workspace" spellcheck="false" autocapitalize="off" maxlength="1024" hidden>
+    <label class="field">
+      <span>First message <span class="muted">(optional)</span></span>
+      <textarea id="ncPrompt" rows="4" maxlength="32000"></textarea>
+    </label>
+    <p id="ncError" class="form-error" role="alert" hidden></p>
+    <div class="row-actions end">
+      <button id="ncCancel" class="btn ghost" type="button">Cancel</button>
+      <button id="ncSubmit" class="btn primary" type="submit">Start chat</button>
+    </div>
+  </form>
+</dialog>
+<noscript><p class="state-view">Agent Deck needs JavaScript. The <a href="/apk">Android app</a> can be downloaded without it.</p></noscript>
+</body>
+</html>
