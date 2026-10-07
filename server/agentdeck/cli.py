@@ -2,6 +2,7 @@
 
     python -m agentdeck.cli run claude|codex [native args...]   run the real TUI in a managed tmux pane and attach
     python -m agentdeck.cli attach [SESSION_ID]                  re-attach this terminal to a managed session
+        (no id on a terminal: pick from a menu; without a TTY: attach the only session or list them as JSON)
     python -m agentdeck.cli list                                 managed sessions (JSON)
     python -m agentdeck.cli notify --kind progress --title T --body B [--current N --total M --unit U] [--stage S]
     python -m agentdeck.cli hook claude|codex                    Claude/Codex hook adapter -> notify (never fails the agent)
@@ -90,10 +91,13 @@ def resume_target(agent: str, args: list[str]) -> str | None:
     return None
 
 
-def _attach(tm, session_id: str) -> "None":
-    cmd = tm.attach_command(session_id)
+def _exec_attach(cmd: list[str]) -> "None":
     env = {k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE")}
     os.execve(cmd[0], cmd, env)
+
+
+def _attach(tm, session_id: str) -> "None":
+    _exec_attach(tm.attach_command(session_id))
 
 
 def cmd_run(ns: argparse.Namespace) -> int:
@@ -124,19 +128,315 @@ def cmd_run(ns: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- attach picker
+
+# CSI / OSC / DCS-style / two-byte escape sequences; anything left over is dropped as a control char.
+_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]?|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[PX^_][^\x1b]*(?:\x1b\\)?|.?)",
+                        re.S)
+PICK_CANCELLED = 130
+
+
+def clean_text(value: object, limit: int = 300) -> str:
+    """Untrusted title/path -> one printable line without escape or control sequences."""
+    text = _ESCAPE_RE.sub("", str(value if value is not None else ""))
+    text = " ".join("".join(ch if ch.isprintable() else " " for ch in text).split())
+    return text[:limit]
+
+
+def _char_width(ch: str) -> int:
+    import unicodedata
+
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def fit(text: str, width: int, left: bool = False) -> str:
+    """Truncate to ``width`` terminal cells with an ellipsis (from the left for paths)."""
+    if width <= 0:
+        return ""
+    if sum(map(_char_width, text)) <= width:
+        return text
+    chars = reversed(text) if left else iter(text)
+    kept, used = [], 1
+    for ch in chars:
+        w = _char_width(ch)
+        if used + w > width:
+            break
+        kept.append(ch)
+        used += w
+    return "…" + "".join(reversed(kept)) if left else "".join(kept) + "…"
+
+
+def _display_path(path: object) -> str:
+    p = clean_text(path, 1000)
+    home = str(Path.home())
+    if p == home or p.startswith(home + os.sep):
+        p = "~" + p[len(home):]
+    return p
+
+
+def session_row(s: dict, width: int, number: int | None = None) -> str:
+    """One line: provider, status, title, project directory and attached marker, fitted to ``width``."""
+    num = f"{number:>2}. " if number is not None else ""
+    head = f"{num}{fit(clean_text(s.get('agent'), 12), 6):<6}  {fit(clean_text(s.get('status'), 20), 9):<9}  "
+    tail = "  [attached]" if s.get("attached") else ""
+    title = clean_text(s.get("title"), 300) or "(untitled)"
+    cwd = _display_path(s.get("cwd"))
+    rest = width - len(head) - len(tail)
+    if rest < 8:
+        return fit(head + title + tail, width)
+    title_w = min(sum(map(_char_width, title)), max(rest // 2, rest - len(cwd) - 2))
+    title = fit(title, title_w)
+    cwd = fit(cwd, rest - sum(map(_char_width, title)) - 2, left=True)
+    return head + title + ("  " + cwd if cwd else "") + tail
+
+
+def parse_keys(data: bytes) -> list[str]:
+    """Raw terminal bytes -> key names (several keys may arrive in one read)."""
+    names = {b"[A": "up", b"OA": "up", b"[B": "down", b"OB": "down", b"[H": "home", b"OH": "home",
+             b"[1~": "home", b"[F": "end", b"OF": "end", b"[4~": "end", b"[5~": "pgup", b"[6~": "pgdn"}
+    single = {b"\r": "enter", b"\n": "enter", b"q": "cancel", b"Q": "cancel", b"\x03": "cancel",
+              b"\x04": "cancel", b"k": "up", b"\x10": "up", b"j": "down", b"\x0e": "down"}
+    keys, i = [], 0
+    while i < len(data):
+        b = data[i:i + 1]
+        if b == b"\x1b":
+            m = re.match(rb"\x1b(\[[0-?]*[ -/]*[@-~]|O[@-~])", data[i:])
+            if m:
+                keys.append(names.get(m.group(1), "other"))
+                i += len(m.group(0))
+                continue
+            keys.append("cancel")  # lone Escape (or Alt+key)
+            i += 2 if i + 1 < len(data) else 1
+            continue
+        if b.isdigit() and b != b"0":
+            keys.append("digit" + b.decode())
+        else:
+            keys.append(single.get(b, "other"))
+        i += 1
+    return keys
+
+
+class Menu:
+    """Selection state and rendering for the interactive picker (no terminal I/O)."""
+
+    def __init__(self, sessions: list[dict]) -> None:
+        self.sessions = sessions
+        unattached = [i for i, s in enumerate(sessions) if not s.get("attached")]
+        self.index = unattached[0] if unattached else 0
+        self.top = 0
+
+    def key(self, name: str, page: int = 10) -> str | None:
+        """Apply a key; returns "enter"/"cancel" when the menu is done."""
+        n = len(self.sessions)
+        if name in ("enter", "cancel"):
+            return name
+        if name == "up":
+            self.index = (self.index - 1) % n
+        elif name == "down":
+            self.index = (self.index + 1) % n
+        elif name == "home":
+            self.index = 0
+        elif name == "end":
+            self.index = n - 1
+        elif name == "pgup":
+            self.index = max(0, self.index - page)
+        elif name == "pgdn":
+            self.index = min(n - 1, self.index + page)
+        elif name.startswith("digit") and int(name[5:]) <= n:
+            self.index = int(name[5:]) - 1
+        return None
+
+    def lines(self, cols: int, rows: int) -> list[str]:
+        width = max(10, cols - 1)  # never touch the last column: avoids auto-wrap breaking redraws
+        n = len(self.sessions)
+        visible = max(1, min(n, rows - 3))
+        if self.index < self.top:
+            self.top = self.index
+        elif self.index >= self.top + visible:
+            self.top = self.index - visible + 1
+        self.top = max(0, min(self.top, n - visible))
+        out = [fit("agent-deck: choose a session to attach  (Up/Down, Enter; q or Esc cancels)", width)]
+        for i in range(self.top, self.top + visible):
+            row = session_row(self.sessions[i], width - 2, i + 1)
+            out.append("\x1b[7m> " + row + "\x1b[0m" if i == self.index else "  " + row)
+        if visible < n:
+            out.append(fit(f"  ({self.top + 1}-{self.top + visible} of {n})", width))
+        return out
+
+
+class _Cancelled(Exception):
+    pass
+
+
+def _write(fd: int, text: str) -> None:
+    data = text.encode(sys.stdout.encoding or "utf-8", errors="replace")
+    while data:
+        data = data[os.write(fd, data):]
+
+
+def _terminal_size(fd: int) -> tuple[int, int]:
+    try:
+        size = os.get_terminal_size(fd)
+        return (size.columns or 80, size.lines or 24)
+    except OSError:
+        return (80, 24)
+
+
+def _read_keys(fd: int) -> bytes:
+    """Collect split arrow sequences without treating their initial Escape as cancellation."""
+    import select
+    import time
+
+    data = os.read(fd, 64)
+    deadline = time.monotonic() + 0.3
+    while (tail := re.search(rb"\x1b(?:\[[0-?]*[ -/]*|O)?$", data)):
+        timeout = min(0.05 if tail.group() == b"\x1b" else 0.3, deadline - time.monotonic())
+        if timeout <= 0 or not select.select([fd], [], [], timeout)[0]:
+            break
+        chunk = os.read(fd, 64)
+        if not chunk:
+            break
+        data += chunk
+    return data
+
+
+def interactive_pick(sessions: list[dict], fd_in: int, fd_out: int) -> str | None:
+    """Arrow-key menu on a real terminal. Terminal mode and signal handlers are always restored."""
+    import select
+    import signal
+    import termios
+
+    old = termios.tcgetattr(fd_in)
+    new = termios.tcgetattr(fd_in)
+    new[0] &= ~(termios.ICRNL | termios.IXON)
+    new[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG | termios.IEXTEN)
+    new[6][termios.VMIN], new[6][termios.VTIME] = 1, 0
+    menu, drawn, size = Menu(sessions), 0, None
+
+    def raise_cancel(*_a):
+        raise _Cancelled
+
+    handlers = {}
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            handlers[sig] = signal.signal(sig, raise_cancel)
+        except (ValueError, OSError):  # not the main thread
+            pass
+    try:
+        termios.tcsetattr(fd_in, termios.TCSANOW, new)
+        _write(fd_out, "\x1b[?25l")
+        while True:
+            if size != (size := _terminal_size(fd_out)) or drawn == 0:
+                lines = menu.lines(*size)
+                up = f"\x1b[{drawn - 1}A" if drawn > 1 else ""
+                _write(fd_out, up + "\r\x1b[J" + "\r\n".join(lines))
+                drawn = len(lines)
+            if not select.select([fd_in], [], [], 0.25)[0]:
+                continue
+            data = _read_keys(fd_in)
+            if not data:
+                return None
+            for k in parse_keys(data):
+                done = menu.key(k, page=max(1, size[1] - 3))
+                if done:
+                    return menu.sessions[menu.index]["id"] if done == "enter" else None
+            size = None  # force a redraw after handled keys
+    except (_Cancelled, KeyboardInterrupt):
+        return None
+    finally:
+        try:
+            if drawn:
+                _write(fd_out, (f"\x1b[{drawn - 1}A" if drawn > 1 else "") + "\r\x1b[J")
+            _write(fd_out, "\x1b[0m\x1b[?25h")
+        finally:
+            try:
+                termios.tcsetattr(fd_in, termios.TCSAFLUSH, old)
+            finally:
+                for sig, h in handlers.items():
+                    signal.signal(sig, h)
+
+
+def numbered_pick(sessions: list[dict], inp, out, width: int = 80) -> str | None:
+    """Line-based fallback for dumb terminals: type a number, empty line/q/EOF cancels."""
+    width = max(20, width - 1)
+    out.write("agent-deck: managed sessions\n")
+    for i, s in enumerate(sessions, 1):
+        out.write(session_row(s, width, i) + "\n")
+    n = len(sessions)
+    for _ in range(5):
+        out.write(f"Attach to session [1-{n}] (Enter cancels): ")
+        out.flush()
+        line = inp.readline()
+        choice = line.strip().lower()
+        if not line or choice in ("", "q", "quit"):
+            return None
+        if choice.isdigit() and 1 <= int(choice) <= n:
+            return sessions[int(choice) - 1]["id"]
+        out.write(f"agent-deck: enter a number from 1 to {n}\n")
+    return None
+
+
+def choose_session(sessions: list[dict]) -> str | None:
+    term = os.environ.get("TERM", "")
+    fd_in, fd_out = sys.stdin.fileno(), sys.stdout.fileno()
+    if term and term != "dumb":
+        import termios
+
+        try:
+            termios.tcgetattr(fd_in)
+        except termios.error:
+            pass
+        else:
+            sys.stdout.flush()
+            return interactive_pick(sessions, fd_in, fd_out)
+    try:
+        return numbered_pick(sessions, sys.stdin, sys.stdout, _terminal_size(fd_out)[0])
+    except KeyboardInterrupt:
+        print(file=sys.stdout)
+        return None
+
+
 def cmd_attach(ns: argparse.Namespace) -> int:
+    from agentdeck.errors import AgentDeckError
     from agentdeck.terminal import TerminalManager
 
-    tm = TerminalManager()
-    sid = ns.session_id
-    if not sid:
-        live = [s for s in tm.list_sessions() if s["capabilities"]["send"]]
-        if len(live) != 1:
-            print(json.dumps([{k: s[k] for k in ("id", "agent", "title", "status", "cwd")} for s in live], indent=1))
-            print("agent-deck: pass a session id" if live else "agent-deck: no live managed sessions", file=sys.stderr)
-            return 2
-        sid = live[0]["id"]
-    _attach(tm, sid)
+    picked = False
+    try:
+        tm = TerminalManager()
+        sid = ns.session_id
+        if not sid:
+            live = [s for s in tm.list_sessions() if s["capabilities"]["send"]]
+            if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                if len(live) != 1:
+                    print(json.dumps([{k: s[k] for k in ("id", "agent", "title", "status", "cwd")} for s in live],
+                                     indent=1))
+                    print("agent-deck: pass a session id" if live else "agent-deck: no live managed sessions",
+                          file=sys.stderr)
+                    return 2
+                sid = live[0]["id"]
+            elif not live:
+                print("agent-deck: no live managed sessions", file=sys.stderr)
+                return 2
+            else:
+                sid = choose_session(live)
+                if sid is None:
+                    print("agent-deck: attach cancelled", file=sys.stderr)
+                    return PICK_CANCELLED
+                picked = True
+        # attach_command re-resolves the exact managed id against the live tmux pane.
+        cmd = tm.attach_command(sid)
+    except (AgentDeckError, OSError) as exc:
+        what = "the selected session is no longer available" if picked else \
+            f"cannot attach to {clean_text(ns.session_id or 'a managed session', 40)}"
+        print(f"agent-deck: {what}: {clean_text(getattr(exc, 'message', exc), 200)}", file=sys.stderr)
+        return 1
+    try:
+        _exec_attach(cmd)
+    except OSError as exc:
+        print(f"agent-deck: could not start tmux ({clean_text(exc, 200)})", file=sys.stderr)
+        return 1
     return 0
 
 

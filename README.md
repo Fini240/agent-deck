@@ -46,6 +46,8 @@ To put normal terminal commands in managed sessions, review and install the opti
 
 Open a new shell afterward. `AGENTDECK_DISABLE=1` bypasses the helper for one invocation; `Ctrl-b d` detaches from tmux while leaving work running. Native executable paths can be overridden with `AGENTDECK_CLAUDE_BIN` and `AGENTDECK_CODEX_BIN`.
 
+To get back into a running managed session, run `agentdeck attach`. In a terminal it shows a menu of the open Claude/Codex sessions with provider, status, title, project directory and an `[attached]` marker. Use Up/Down (or `j`/`k`, or a number) and Enter to attach; `q`, Escape or `Ctrl-C` cancels. On a `TERM=dumb` terminal it asks for a number instead. `agentdeck attach SESSION_ID` attaches directly. Without a TTY it attaches the only session, or prints the sessions as JSON when there are several.
+
 ## Android APK
 
 Requirements: JDK 21 and Android SDK 36. Set `JAVA_HOME` and your SDK location (`ANDROID_HOME` or an untracked `android/local.properties`), then:
