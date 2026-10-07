@@ -623,6 +623,8 @@ def cmd_models(ns: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if not argv:
+        argv = ["attach"]
     if argv[:1] == ["pair"]:
         # argparse REMAINDER drops leading options (--json, --svg), so forward everything verbatim.
         return cmd_pair(argparse.Namespace(args=argv[1:]))

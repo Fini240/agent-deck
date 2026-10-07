@@ -17,12 +17,15 @@ sealed class ApiException(message: String, cause: Throwable? = null) : Exception
     )
 
     class Network(cause: IOException) : ApiException(
-        "Can't reach the Mac. Check that Tailscale is connected on this phone and the helper is running.", cause,
+        "Can't reach the helper. Check that Tailscale is connected on this phone and the helper is running.", cause,
     )
 
     class Protocol(message: String, cause: Throwable? = null) : ApiException(message, cause)
 
-    class NotPaired : ApiException("This phone is not paired with a Mac yet.")
+    class NotPaired : ApiException("This phone is not paired with that device. Pair it in Agent Deck first.")
+
+    /** Work started for one saved device after another device became active; nothing was sent. */
+    class HostChanged : ApiException("Another device is selected now. Switch back to check this action and continue.")
 
     /** True when retrying the same request later may succeed. */
     val isTransient: Boolean

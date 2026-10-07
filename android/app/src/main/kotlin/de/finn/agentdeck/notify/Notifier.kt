@@ -18,12 +18,19 @@ import de.finn.agentdeck.R
 import de.finn.agentdeck.core.push.Channel
 import de.finn.agentdeck.core.push.NotificationPlan
 import de.finn.agentdeck.core.push.ProgressBar
+import de.finn.agentdeck.data.HostKeys
 
 /**
- * Maps [NotificationPlan]s onto Android notifications. One notification per session: the session
- * ID is the notification tag and part of every PendingIntent's identity, so two sessions can never
- * replace each other's notification or reply target.
+ * The saved pairing a notification belongs to. Every tag, PendingIntent identity and reply target
+ * is namespaced by it, so the same session ID on two hosts (or two pairings of one host) never
+ * replaces the other's notification or sends through the wrong pairing.
  */
+data class NotificationTarget(val hostKey: String, val deviceId: String, val hostLabel: String) {
+    val pairingKey: String get() = HostKeys.pairing(hostKey, deviceId)
+    fun tag(sessionId: String) = "$pairingKey|$sessionId"
+}
+
+/** Maps [NotificationPlan]s onto Android notifications: one notification per pairing and session. */
 class Notifier(private val context: Context) {
     private val manager = NotificationManagerCompat.from(context)
 
@@ -61,16 +68,16 @@ class Notifier(private val context: Context) {
         return Channel.entries.filter { nm.getNotificationChannel(it.id)?.importance == NotificationManager.IMPORTANCE_NONE }
     }
 
-    /** [deviceId] is the pairing the push was decrypted for; a reply is only sent through that pairing. */
-    fun show(plan: NotificationPlan, agentLabel: String, deviceId: String) {
+    /** [target] is the pairing the push was decrypted for; a reply is only sent through that pairing. */
+    fun show(plan: NotificationPlan, agentLabel: String, target: NotificationTarget) {
         if (!canPost()) return
         val b = NotificationCompat.Builder(context, plan.channel.id)
             .setSmallIcon(R.drawable.ic_stat_agent)
             .setContentTitle(plan.title)
             .setContentText(plan.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(plan.text))
-            .setSubText(agentLabel)
-            .setContentIntent(openSession(plan.sessionId))
+            .setSubText("$agentLabel · ${target.hostLabel}")
+            .setContentIntent(openSession(target, plan.sessionId))
             .setOngoing(plan.ongoing)
             .setOnlyAlertOnce(plan.onlyAlertOnce)
             .setSilent(plan.silent)
@@ -90,22 +97,40 @@ class Notifier(private val context: Context) {
         }
         if (plan.requestPromotedOngoing) b.setRequestPromotedOngoing(true)
         plan.timeoutMillis?.let { b.setTimeoutAfter(it) }
-        if (plan.allowReply) b.addAction(replyAction(plan.sessionId, deviceId))
-        post(plan.sessionId, SESSION_ID, b)
+        if (plan.allowReply) b.addAction(replyAction(target, plan.sessionId))
+        post(target.tag(plan.sessionId), SESSION_ID, b)
     }
 
     /** Replaces the session notification while a direct reply is in flight / after it resolves. */
-    fun showReplyStatus(sessionId: String, title: String, text: String, failed: Boolean) {
+    fun showReplyStatus(target: NotificationTarget, sessionId: String, title: String, text: String, failed: Boolean) {
         if (!canPost()) return
         val b = NotificationCompat.Builder(context, Channel.REPLIES.id)
             .setSmallIcon(R.drawable.ic_stat_agent)
             .setContentTitle(title)
             .setContentText(text)
+            .setSubText(target.hostLabel)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setContentIntent(openSession(sessionId))
+            .setContentIntent(openSession(target, sessionId))
             .setAutoCancel(true)
             .setSilent(!failed)
-        post(sessionId, SESSION_ID, b)
+        post(target.tag(sessionId), SESSION_ID, b)
+    }
+
+    /**
+     * A reply whose device can't be established (a notification from an older app version, or one
+     * whose pairing is gone). Shows the text so nothing is lost; opens the app without a chat.
+     */
+    fun showOrphanReplyFailure(tag: String, text: String) {
+        if (!canPost()) return
+        val body = "The device this notification came from was removed or paired again, so nothing was sent. Your text: $text"
+        val b = NotificationCompat.Builder(context, Channel.REPLIES.id)
+            .setSmallIcon(R.drawable.ic_stat_agent)
+            .setContentTitle("Reply not sent")
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(openApp())
+            .setAutoCancel(true)
+        post(tag, SESSION_ID, b)
     }
 
     /** Local-only test: proves this phone can display alerts, not that the Mac can reach it. */
@@ -114,16 +139,21 @@ class Notifier(private val context: Context) {
         val b = NotificationCompat.Builder(context, Channel.RESULTS.id)
             .setSmallIcon(R.drawable.ic_stat_agent)
             .setContentTitle("Local test notification")
-            .setContentText("Shown by this phone. It does not test delivery from the Mac.")
+            .setContentText("Shown by this phone. It does not test delivery from a paired device.")
             .setAutoCancel(true)
             .setContentIntent(openApp())
         post(null, TEST_ID, b)
         return true
     }
 
-    fun cancel(sessionId: String) = manager.cancel(sessionId, SESSION_ID)
+    fun cancel(target: NotificationTarget, sessionId: String) = manager.cancel(target.tag(sessionId), SESSION_ID)
 
-    /** Pairing changed: notifications of the old pairing must not stay around with reply actions. */
+    /** A pairing was removed or replaced: its notifications must not stay around with reply actions. */
+    fun cancelPairing(pairingKey: String) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        nm.activeNotifications.filter { it.tag?.startsWith("$pairingKey|") == true }.forEach { manager.cancel(it.tag, it.id) }
+    }
+
     fun cancelAll() = manager.cancelAll()
 
     private fun post(tag: String?, id: Int, b: NotificationCompat.Builder) {
@@ -134,13 +164,14 @@ class Notifier(private val context: Context) {
         }
     }
 
-    private fun replyAction(sessionId: String, deviceId: String): NotificationCompat.Action {
-        val input = RemoteInput.Builder(ReplyReceiver.KEY_TEXT).setLabel("Reply to this session").build()
+    private fun replyAction(target: NotificationTarget, sessionId: String): NotificationCompat.Action {
+        val input = RemoteInput.Builder(ReplyReceiver.KEY_TEXT).setLabel("Reply on ${target.hostLabel}").build()
         val intent = Intent(context, ReplyReceiver::class.java)
             .setAction(ReplyReceiver.ACTION_REPLY)
-            .setData(sessionUri(sessionId))
+            .setData(sessionUri(target, sessionId))
             .putExtra(ReplyReceiver.EXTRA_SESSION, sessionId)
-            .putExtra(ReplyReceiver.EXTRA_DEVICE, deviceId)
+            .putExtra(ReplyReceiver.EXTRA_HOST, target.hostKey)
+            .putExtra(ReplyReceiver.EXTRA_DEVICE, target.deviceId)
         val pi = PendingIntent.getBroadcast(
             context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
@@ -153,12 +184,14 @@ class Notifier(private val context: Context) {
             .build()
     }
 
-    private fun openSession(sessionId: String): PendingIntent = PendingIntent.getActivity(
+    private fun openSession(target: NotificationTarget, sessionId: String): PendingIntent = PendingIntent.getActivity(
         context, 0,
         Intent(context, MainActivity::class.java)
             .setAction(MainActivity.ACTION_OPEN_SESSION)
-            .setData(sessionUri(sessionId))
+            .setData(sessionUri(target, sessionId))
             .putExtra(MainActivity.EXTRA_SESSION_ID, sessionId)
+            .putExtra(MainActivity.EXTRA_HOST, target.hostKey)
+            .putExtra(MainActivity.EXTRA_DEVICE, target.deviceId)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
@@ -169,13 +202,15 @@ class Notifier(private val context: Context) {
 
     companion object {
         private const val TEST_ID = 1
-        /** Session notifications share this ID; the session ID tag makes each one distinct. */
+        /** Session notifications share this ID; the pairing + session tag makes each one distinct. */
         const val SESSION_ID = 2
 
         /**
-         * Makes PendingIntents distinct per session: extras are ignored by Intent.filterEquals, so
-         * without this FLAG_UPDATE_CURRENT would retarget another session's reply/open action.
+         * Makes PendingIntents distinct per pairing and session: extras are ignored by
+         * Intent.filterEquals, so without this FLAG_UPDATE_CURRENT would retarget another
+         * notification's reply/open action.
          */
-        fun sessionUri(sessionId: String): Uri = Uri.Builder().scheme("agentdeck-session").opaquePart(sessionId).build()
+        fun sessionUri(target: NotificationTarget, sessionId: String): Uri =
+            Uri.Builder().scheme("agentdeck-session").opaquePart(target.tag(sessionId)).build()
     }
 }

@@ -1,19 +1,20 @@
 # Agent Deck
 
-A native Android app and mobile web dashboard for checking and steering Claude Code and Codex terminal sessions on your Mac.
+A native Android app and mobile web dashboard for checking and steering Claude Code and Codex terminal sessions on your Mac or an independent Linux server.
 
 ## Features
 
 - Project folders with expandable real subagents, each with its own task, messages, tool activity and status.
-- Needs you activity filtering and per-Mac pinned chats for finding conversations quickly.
+- Needs you activity filtering and per-host pinned chats for finding conversations quickly.
 - Readable assistant replies with copyable code and quick replies that prepare an editable draft.
 - Follow-up messages to the same managed terminal session, with interruption enabled by default; stop controls and permission approvals.
 - New chats with models discovered from your installed CLIs, plus exact custom model IDs.
+- Save up to eight devices, switch hosts from a chat or the session list, and add, rename or remove hosts. Chats, drafts, approvals and notification replies stay with their original host.
 - Private HTTPS through Tailscale, device pairing and revocation.
 - Android encrypted FCM notifications: silent activity/progress updates, completion/error/input alerts and direct notification replies.
 - Real progress totals when available; an activity indicator when no percentage is known.
 - A browser dashboard with a signed APK download button, usable before browser pairing.
-- In-app APK updates from the paired Mac: check, verified download progress and Android installation confirmation.
+- In-app APK updates from the selected host: check, verified download progress and Android installation confirmation.
 - Native Compose layouts for phone and larger screens, with editable source throughout.
 
 Agent Deck uses your installed terminal CLIs and their normal authentication. It does not require provider API keys. Existing unmanaged chats are inspectable; controls require a managed session. Active unmanaged chats are never silently cloned. Child agents are inspectable and steered through their parent.
@@ -53,9 +54,13 @@ To get back into a running managed session, run `agentdeck attach`. In a termina
 
 The shell block also defines the shortcut `ad`: plain `ad` opens the session menu (same as `agentdeck attach`), and `ad` with arguments forwards them to `agentdeck`, e.g. `ad pair`.
 
+## Independent Linux server
+
+See [Linux host setup](docs/LINUX-HOST.md) for the Docker installer, persistent workspace, separate subscription logins and Tailscale Serve. Each host operates independently: turning off the Mac does not stop work on the Linux host. Sessions and files stay on the host where they were created. The phone must pair with each helper once.
+
 ## Android APK
 
-Version 0.2.3 adds Needs you filtering, pinned chats, readable replies and editable quick replies. See [the mobile workflow review](docs/COMPETITOR-UX.md) and [the earlier usability changes](docs/ANDROID-UX.md). Newer versions show an update popup when you open the app; download and install through Settings → App updates.
+Version 0.3.0 adds multiple saved devices and independent Linux hosting, with notifications and replies routed to their original pairing. Version 0.2.3 added Needs you filtering, pinned chats, readable replies and editable quick replies. See [the mobile workflow review](docs/COMPETITOR-UX.md) and [the earlier usability changes](docs/ANDROID-UX.md). Newer versions show an update popup when you open the app; download and install through Settings → App updates.
 
 Requirements: JDK 21 and Android SDK 36. Set `JAVA_HOME` and your SDK location (`ANDROID_HOME` or an untracked `android/local.properties`), then:
 

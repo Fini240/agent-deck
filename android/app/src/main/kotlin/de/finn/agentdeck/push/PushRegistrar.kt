@@ -10,6 +10,10 @@ import de.finn.agentdeck.BuildConfig
 import de.finn.agentdeck.core.api.ApiException
 import de.finn.agentdeck.data.AgentDeckRepository
 import de.finn.agentdeck.data.Credentials
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,68 +56,87 @@ data class PushStatus(
     fun describe(): Triple<Level, String, String> = when {
         !buildConfigured -> Triple(
             Level.OFF, "Push not configured in this build",
-            "This APK was built without a Firebase config, so the Mac cannot reach the phone while the app is closed. " +
+            "This APK was built without a Firebase config, so the selected device cannot reach the phone while the app is closed. " +
                 "Live updates still work while the app is open.",
         )
         firebaseError != null -> Triple(Level.OFF, "Push failed to start", firebaseError)
         token is TokenState.Failed -> Triple(Level.WARNING, "No push token", "Firebase did not issue a token: ${token.message}")
         token != TokenState.Available -> Triple(Level.WARNING, "Waiting for push token", "Firebase has not issued a token yet.")
-        registration is Registration.Failed -> Triple(Level.WARNING, "Push token not registered", "The Mac did not accept the token: ${registration.message}")
-        registration !is Registration.Registered -> Triple(Level.WARNING, "Push token not registered", "The Mac does not have this phone's push token yet.")
+        registration is Registration.Failed -> Triple(Level.WARNING, "Push token not registered", "The selected device did not accept the token: ${registration.message}")
+        registration !is Registration.Registered -> Triple(Level.WARNING, "Push token not registered", "The selected device does not have this phone's push token yet.")
         !permissionGranted -> Triple(
             Level.WARNING, "Notifications are blocked",
             "Push is registered, but Android will not show notifications until you allow them.",
         )
         else -> Triple(
-            Level.OK, "Push registered with the Mac",
-            "The Mac has this phone's token. Delivery is only proven once a real notification arrives.",
+            Level.OK, "Push registered with the selected device",
+            "The selected device has this phone's token. Delivery is only proven once a real notification arrives.",
         )
     }
 }
 
 /**
- * Obtains the FCM token and registers it with the paired Mac. All Firebase calls are guarded:
+ * Obtains the FCM token and registers it with each paired device. All Firebase calls are guarded:
  * in a push-unconfigured build none of them run.
  */
 class PushRegistrar(
     private val context: Context,
     private val prefs: SharedPreferences,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val configured: Boolean = BuildConfig.PUSH_CONFIGURED,
+    private val tokenProvider: (suspend () -> String?)? = null,
 ) {
-    private val _status = MutableStateFlow(PushStatus(buildConfigured = BuildConfig.PUSH_CONFIGURED))
+    private val _status = MutableStateFlow(PushStatus(buildConfigured = configured))
     val status: StateFlow<PushStatus> = _status.asStateFlow()
+
+    @Volatile private var selected: Credentials? = null
+    private val registrations = mutableMapOf<String, PushStatus.Registration>()
+    private fun key(creds: Credentials, field: String) = "${creds.pairingKey}:$field"
+    private fun registration(creds: Credentials, value: PushStatus.Registration) {
+        synchronized(registrations) { registrations[creds.pairingKey] = value }
+        _status.update { if (selected == creds) it.copy(registration = value) else it }
+    }
+
+    /** Register independently, so an offline machine cannot block the others. */
+    suspend fun ensureRegisteredAll(repository: AgentDeckRepository, credentials: List<Credentials>): List<ApiException> = coroutineScope {
+        credentials.map { creds -> async {
+            try { ensureRegistered(repository, creds); null }
+            catch (e: ApiException) { e }
+        } }.awaitAll().filterNotNull()
+    }
 
     fun setPermissionGranted(granted: Boolean) = _status.update { it.copy(permissionGranted = granted) }
 
     /** Restores "registered" only if the stored registration matches this device and token. */
     fun restore(creds: Credentials?) {
-        if (!BuildConfig.PUSH_CONFIGURED || creds == null) return
-        val at = prefs.getLong(K_AT, 0L)
-        if (at > 0 && prefs.getString(K_DEVICE, null) == creds.deviceId && prefs.getString(K_SERVER, null) == creds.server.value) {
-            _status.update { it.copy(registration = PushStatus.Registration.Registered(at)) }
-        }
+        selected = creds
+        val saved = creds?.let {
+            val at = prefs.getLong(key(it, K_AT), 0)
+            synchronized(registrations) { registrations[it.pairingKey] } ?: if (at > 0) PushStatus.Registration.Registered(at) else null
+        } ?: PushStatus.Registration.NotRegistered
+        _status.update { it.copy(registration = saved) }
     }
 
     /** Returns a token for the pair request if one is quickly available, else null. */
-    suspend fun tokenForPairing(): String? = if (!BuildConfig.PUSH_CONFIGURED) null else withTimeoutOrNull(5_000) { fetchToken() }
+    suspend fun tokenForPairing(): String? = if (!configured) null else withTimeoutOrNull(5_000) { fetchToken() }
 
-    /** Ensures the Mac has the current token. Safe to call repeatedly. */
+    /** Ensures the selected device has the current token. Safe to call repeatedly. */
     suspend fun ensureRegistered(repository: AgentDeckRepository, creds: Credentials, force: Boolean = false) {
-        if (!BuildConfig.PUSH_CONFIGURED) return
+        if (!configured) return
         val token = fetchToken() ?: return
         val hash = sha256(token)
-        val same = prefs.getString(K_TOKEN_HASH, null) == hash && prefs.getString(K_DEVICE, null) == creds.deviceId &&
-            prefs.getString(K_SERVER, null) == creds.server.value && prefs.getLong(K_AT, 0) > 0
+        val same = prefs.getString(key(creds, K_TOKEN_HASH), null) == hash && prefs.getString(key(creds, K_DEVICE), null) == creds.deviceId &&
+            prefs.getString(key(creds, K_SERVER), null) == creds.server.value && prefs.getLong(key(creds, K_AT), 0) > 0
         if (same && !force) {
-            _status.update { it.copy(registration = PushStatus.Registration.Registered(prefs.getLong(K_AT, 0))) }
+            registration(creds, PushStatus.Registration.Registered(prefs.getLong(key(creds, K_AT), 0)))
             return
         }
-        _status.update { it.copy(registration = PushStatus.Registration.Registering) }
+        registration(creds, PushStatus.Registration.Registering)
         try {
-            repository.callFor(creds) { updateFcmToken(creds.deviceId, token) }
+            repository.callSaved(creds) { updateFcmToken(creds.deviceId, token) }
             markRegistered(creds, hash)
         } catch (e: ApiException) {
-            _status.update { it.copy(registration = PushStatus.Registration.Failed(e.message ?: "unknown error")) }
+            registration(creds, PushStatus.Registration.Failed(e.message ?: "unknown error"))
             throw e
         }
     }
@@ -121,29 +144,38 @@ class PushRegistrar(
     /** Pairing sent the token in the pair request itself. */
     fun markRegisteredViaPairing(creds: Credentials, token: String) = markRegistered(creds, sha256(token))
 
-    fun forget() {
-        prefs.edit(commit = true) { clear() }
-        _status.update { it.copy(registration = PushStatus.Registration.NotRegistered) }
+    fun forget(pairingKey: String? = selected?.pairingKey) {
+        if (pairingKey != null) {
+            prefs.edit(commit = true) { prefs.all.keys.filter { it.startsWith("$pairingKey:") }.forEach { remove(it) } }
+            synchronized(registrations) { registrations.remove(pairingKey) }
+        }
+        if (pairingKey == selected?.pairingKey) _status.update { it.copy(registration = PushStatus.Registration.NotRegistered) }
     }
 
     /** Token rotated: registration no longer valid until re-sent. */
     fun onTokenRotated() {
-        prefs.edit { remove(K_AT); remove(K_TOKEN_HASH) }
+        prefs.edit(commit = true) { prefs.all.keys.filter { it.endsWith(":$K_AT") || it.endsWith(":$K_TOKEN_HASH") || it == K_AT || it == K_TOKEN_HASH }.forEach { remove(it) } }
+        synchronized(registrations) { registrations.clear() }
         _status.update { it.copy(token = PushStatus.TokenState.Available, registration = PushStatus.Registration.NotRegistered) }
     }
 
     private fun markRegistered(creds: Credentials, hash: String) {
         val now = clock()
         prefs.edit(commit = true) {
-            putString(K_TOKEN_HASH, hash)
-            putString(K_DEVICE, creds.deviceId)
-            putString(K_SERVER, creds.server.value)
-            putLong(K_AT, now)
+            putString(key(creds, K_TOKEN_HASH), hash)
+            putString(key(creds, K_DEVICE), creds.deviceId)
+            putString(key(creds, K_SERVER), creds.server.value)
+            putLong(key(creds, K_AT), now)
         }
-        _status.update { it.copy(registration = PushStatus.Registration.Registered(now)) }
+        registration(creds, PushStatus.Registration.Registered(now))
     }
 
     private suspend fun fetchToken(): String? {
+        tokenProvider?.let { provider ->
+            val token = provider()
+            _status.update { it.copy(token = if (token == null) PushStatus.TokenState.Failed("No token") else PushStatus.TokenState.Available) }
+            return token
+        }
         val messaging = try {
             if (FirebaseApp.getApps(context).isEmpty()) FirebaseApp.initializeApp(context)
             FirebaseMessaging.getInstance()
@@ -156,7 +188,8 @@ class PushRegistrar(
             val token = messaging.token.await()
             _status.update { it.copy(token = PushStatus.TokenState.Available) }
             token
-        } catch (e: Exception) {
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
             _status.update { it.copy(token = PushStatus.TokenState.Failed(e.message ?: e.javaClass.simpleName)) }
             null
         }

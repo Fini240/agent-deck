@@ -9,6 +9,8 @@ import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import de.finn.agentdeck.core.api.ApiException
 import de.finn.agentdeck.data.DraftStore
+import de.finn.agentdeck.data.Credentials
+import de.finn.agentdeck.core.api.ServerUrl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -32,20 +34,20 @@ class ReplyDeliveryTest {
     private var failure: Exception? = null
 
     private val delivery = ReplyDelivery(
-        currentDeviceId = { device },
-        send = { s, t, r -> failure?.let { throw it }; sent += Triple(s, t, r) },
+        resolve = { host, dev -> if (device == dev) Credentials(ServerUrl.trusted(host), "Mac", dev, "token", ByteArray(32)) else null },
+        send = { _, s, t, r -> failure?.let { throw it }; sent += Triple(s, t, r) },
         drafts = drafts,
         status = { _, title, _, failed -> shown += title to failed },
         clock = { now },
     )
-    private val reply = QueuedReply("dev1", "s1", "continue", "req-1", now)
+    private val reply = QueuedReply("https://mac.ts.net", "dev1", "s1", "continue", "req-1", now)
 
     @Test
     fun sendsOnceWithTheQueuedRequestId() = runTest {
         assertEquals(ReplyDelivery.Outcome.SENT, delivery.deliver(reply, 0))
         assertEquals(listOf(Triple("s1", "continue", "req-1")), sent)
         assertEquals("Reply sent" to false, shown.last())
-        assertEquals("", drafts.get("s1").text)
+        assertEquals("", drafts.get(reply.draftKey).text)
     }
 
     @Test
@@ -54,16 +56,16 @@ class ReplyDeliveryTest {
         assertEquals(ReplyDelivery.Outcome.RETRY, delivery.deliver(reply, 0))
         assertEquals(ReplyDelivery.Outcome.FAILED, delivery.deliver(reply, ReplyDelivery.MAX_ATTEMPTS))
         assertEquals("Reply not sent" to true, shown.last())
-        assertEquals("continue", drafts.get("s1").text)
+        assertEquals("continue", drafts.get(reply.draftKey).text)
         // The last attempt may have reached the Mac: sending the draft must be deduplicated there.
-        assertEquals("req-1", drafts.requestIdFor("s1", "continue"))
+        assertEquals("req-1", drafts.requestIdFor(reply.draftKey, "continue", reply.pairingKey))
     }
 
     @Test
     fun revokedDeviceBecomesDraft() = runTest {
         failure = ApiException.Unauthorized("Pair again.")
         assertEquals(ReplyDelivery.Outcome.FAILED, delivery.deliver(reply, 0))
-        assertEquals("continue", drafts.get("s1").text)
+        assertEquals("continue", drafts.get(reply.draftKey).text)
     }
 
     @Test
@@ -71,7 +73,7 @@ class ReplyDeliveryTest {
         failure = IllegalStateException("boom")
         assertEquals(ReplyDelivery.Outcome.FAILED, delivery.deliver(reply, 0))
         assertEquals("Reply not sent" to true, shown.last())
-        assertEquals("continue", drafts.get("s1").text)
+        assertEquals("continue", drafts.get(reply.draftKey).text)
     }
 
     @Test
@@ -82,7 +84,7 @@ class ReplyDeliveryTest {
             fail("expected cancellation")
         } catch (_: CancellationException) {
         }
-        assertEquals("", drafts.get("s1").text)
+        assertEquals("", drafts.get(reply.draftKey).text)
         assertTrue(shown.isEmpty())
     }
 
@@ -93,8 +95,8 @@ class ReplyDeliveryTest {
         device = null // or removed and not paired
         assertEquals(ReplyDelivery.Outcome.FAILED, delivery.deliver(reply, 0))
         assertTrue(sent.isEmpty())
-        assertEquals("continue", drafts.get("s1").text)
-        assertNotEquals("req-1", drafts.requestIdFor("s1", "continue"))
+        assertEquals("continue", drafts.get(reply.draftKey).text)
+        assertNotEquals("req-1", drafts.requestIdFor(reply.draftKey, "continue", reply.pairingKey))
     }
 
     @Test
@@ -102,24 +104,24 @@ class ReplyDeliveryTest {
         now += ReplyDelivery.MAX_AGE_MILLIS + 1
         assertEquals(ReplyDelivery.Outcome.FAILED, delivery.deliver(reply, 0))
         assertTrue(sent.isEmpty())
-        assertEquals("continue", drafts.get("s1").text)
+        assertEquals("continue", drafts.get(reply.draftKey).text)
     }
 
     @Test
     fun failedReplyMergesIntoExistingDraftWithoutReusingItsRequestId() {
-        drafts.setText("s1", "typed in app")
-        drafts.restoreFailedReply("s1", "continue", "req-1")
-        assertEquals("typed in app\ncontinue", drafts.get("s1").text)
-        assertNotEquals("req-1", drafts.requestIdFor("s1", "typed in app\ncontinue"))
+        drafts.setText(reply.draftKey, "typed in app")
+        drafts.restoreFailedReply(reply.draftKey, "continue", "req-1", reply.pairingKey)
+        assertEquals("typed in app\ncontinue", drafts.get(reply.draftKey).text)
+        assertNotEquals("req-1", drafts.requestIdFor(reply.draftKey, "typed in app\ncontinue", reply.pairingKey))
     }
 
     @Test
     fun duplicateReplyBroadcastIsQueuedOncePerPairing() {
         WorkManagerTestInitHelper.initializeTestWorkManager(ctx)
         val wm = WorkManager.getInstance(ctx)
-        ReplyReceiver.enqueue(ctx, "dev1", "s1", "yes")
-        ReplyReceiver.enqueue(ctx, "dev1", "s1", "yes")
-        ReplyReceiver.enqueue(ctx, "dev2", "s1", "yes")
+        ReplyReceiver.enqueue(ctx, "https://mac.ts.net", "dev1", "s1", "yes")
+        ReplyReceiver.enqueue(ctx, "https://mac.ts.net", "dev1", "s1", "yes")
+        ReplyReceiver.enqueue(ctx, "https://mac.ts.net", "dev2", "s1", "yes")
         val pending = wm.getWorkInfosByTag(ReplyWorker.TAG).get().filter { it.state == WorkInfo.State.ENQUEUED }
         assertEquals(2, pending.size)
     }

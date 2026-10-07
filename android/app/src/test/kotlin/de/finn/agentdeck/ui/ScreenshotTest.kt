@@ -3,6 +3,7 @@ package de.finn.agentdeck.ui
 import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -127,13 +128,20 @@ class ScreenshotTest {
 
     @Composable
     private fun Home(selectedDetail: DetailUi?, selected: String?) {
-        BoxWithConstraints {
+        Column(Modifier.fillMaxSize()) {
+            val hosts = listOf("Mac" to "https://mac.test", "ZimaOS" to "https://zima.test").map { (name, url) ->
+                de.finn.agentdeck.data.SavedHost(url, name, name, "dev-$name", 1,
+                    de.finn.agentdeck.data.Credentials(de.finn.agentdeck.core.api.ServerUrl.trusted(url), name, "dev-$name", "test-token", ByteArray(32)))
+            }
+            HostPicker(hosts, hosts.first().key, {}, {}, { _, _ -> }, {})
+            BoxWithConstraints(Modifier.weight(1f)) {
             val wide = maxWidth >= TwoPaneMinWidth
             AdaptiveHome(
                 wide = wide, totalWidth = maxWidth, showDetail = selectedDetail != null,
                 list = { List(listUi(selected)) },
                 detail = { selectedDetail?.let { SessionDetailPane(it, DetailActions(onBack = if (wide) null else ({}))) } },
             )
+            }
         }
     }
 

@@ -112,16 +112,16 @@ fun SettingsScreen(ui: SettingsUi, actions: SettingsActions, modifier: Modifier 
                 HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 NotificationSection(ui, actions)
                 HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                ui.serverSettings?.let { MacPreferences(it, ui, actions) } ?: run {
-                    SectionTitle("Mac preferences")
-                    Text("Loaded from the Mac once connected.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                ui.serverSettings?.let { DevicePreferences(it, ui, actions) } ?: run {
+                    SectionTitle("Device preferences")
+                    Text("Loaded from this device once connected.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 SectionTitle("About")
                 KeyValue("App version", ui.appVersion)
                 Text(
-                    "No analytics or ads. Chats and controls go only between this phone and your Mac over Tailscale HTTPS. " +
-                        "Notifications travel through Google's push service end-to-end encrypted with a key only this phone and your Mac have.",
+                    "No analytics or ads. Chats and controls go only between this phone and your device over Tailscale HTTPS. " +
+                        "Notifications travel through Google's push service end-to-end encrypted with a key only this phone and your device have.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 24.dp),
                 )
             }
@@ -131,7 +131,7 @@ fun SettingsScreen(ui: SettingsUi, actions: SettingsActions, modifier: Modifier 
         AlertDialog(
             onDismissRequest = { confirmForget = false },
             title = { Text("Remove this phone?") },
-            text = { Text("The Mac revokes this phone's access and the saved credentials are deleted here. You'll need a new pairing code.") },
+            text = { Text("The device revokes this phone's access and the saved credentials are deleted here. You'll need a new pairing code.") },
             confirmButton = { TextButton(onClick = { confirmForget = false; actions.onForget() }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
         )
@@ -141,7 +141,7 @@ fun SettingsScreen(ui: SettingsUi, actions: SettingsActions, modifier: Modifier 
 @Composable
 private fun ConnectionSection(ui: SettingsUi, actions: SettingsActions, onForget: () -> Unit) {
     SectionTitle("Connection")
-    KeyValue("Mac", ui.serverName.ifBlank { "—" })
+    KeyValue("Device", ui.serverName.ifBlank { "—" })
     KeyValue("Address", ui.serverUrl)
     KeyValue("This phone", ui.deviceId.take(12).ifBlank { "—" })
     val (connText, ok) = when (val c = ui.connection) {
@@ -158,7 +158,7 @@ private fun ConnectionSection(ui: SettingsUi, actions: SettingsActions, onForget
         KeyValue("Helper", st.version ?: "unknown version")
         KeyValue("Session discovery", if (st.providers.available) "Available" else "Unavailable${st.providers.error?.let { ": $it" } ?: ""}")
         KeyValue("Terminal control", if (st.terminal.available) "Available" else "Unavailable${st.terminal.error?.let { ": $it" } ?: ""}")
-        st.keepAwake?.let { k -> KeyValue("Keep Mac awake", (if (k.held) "Holding (agent working)" else "Not holding") + (k.mode?.let { " · mode $it" } ?: "") + (k.error?.let { " · $it" } ?: "")) }
+        st.keepAwake?.let { k -> KeyValue("Keep device awake", (if (k.held) "Holding (agent working)" else "Not holding") + (k.mode?.let { " · mode $it" } ?: "") + (k.error?.let { " · $it" } ?: "")) }
         st.monitor?.refreshedAt?.let { KeyValue("Last scan", relativeTime(it)) }
     }
     ui.statusError?.let { Banner(it, Modifier.padding(vertical = 4.dp)) }
@@ -180,7 +180,7 @@ private fun NotificationSection(ui: SettingsUi, actions: SettingsActions) {
     )
     Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
     ui.serverStatus?.push?.let { p ->
-        KeyValue("Mac sender", if (p.available) "Ready${p.projectId?.let { " ($it)" } ?: ""}" else "Not ready${p.reason?.let { ": $it" } ?: ""}")
+        KeyValue("Device sender", if (p.available) "Ready${p.projectId?.let { " ($it)" } ?: ""}" else "Not ready${p.reason?.let { ": $it" } ?: ""}")
         KeyValue("Phones with token", p.devicesWithToken.toString())
     }
     if (ui.permissionNeeded) {
@@ -194,13 +194,13 @@ private fun NotificationSection(ui: SettingsUi, actions: SettingsActions) {
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp),
     )
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-        Button(onClick = actions.onPushTest, enabled = !ui.testing && ui.push.buildConfigured) { Text(if (ui.testing) "Sending…" else "Send test from Mac") }
+        Button(onClick = actions.onPushTest, enabled = !ui.testing && ui.push.buildConfigured) { Text(if (ui.testing) "Sending…" else "Send test from device") }
         OutlinedButton(onClick = actions.onLocalTest) { Text("Local test only") }
         OutlinedButton(onClick = actions.onOpenNotificationSettings) { Text("Android settings") }
         if (ui.push.buildConfigured && !ui.push.connected) OutlinedButton(onClick = actions.onRegisterPush) { Text("Register again") }
     }
     Text(
-        "\"Send test from Mac\" goes through the real encrypted push path and only proves delivery when the notification appears. " +
+        "\"Send test from device\" goes through the real encrypted push path and only proves delivery when the notification appears. " +
             "\"Local test\" is shown by this phone alone.",
         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp),
     )
@@ -208,8 +208,8 @@ private fun NotificationSection(ui: SettingsUi, actions: SettingsActions) {
 }
 
 @Composable
-private fun MacPreferences(s: ServerSettings, ui: SettingsUi, actions: SettingsActions) {
-    SectionTitle("Mac preferences")
+private fun DevicePreferences(s: ServerSettings, ui: SettingsUi, actions: SettingsActions) {
+    SectionTitle("Device preferences")
     var notifyOn by rememberSaveable(s) { mutableStateOf(s.notifyOn.toSet()) }
     var keepAwake by rememberSaveable(s) { mutableStateOf(s.keepAwakeMode ?: "active") }
     var interval by rememberSaveable(s) { mutableStateOf(s.progressIntervalSeconds?.toString().orEmpty()) }
@@ -232,7 +232,7 @@ private fun MacPreferences(s: ServerSettings, ui: SettingsUi, actions: SettingsA
         label = { Text("Minimum seconds between progress updates") },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
     )
-    Text("Keep the Mac awake", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+    Text("Keep this device awake", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
     val modes = listOf("active" to "While working", "plugged_in" to "Only on power", "off" to "Never")
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         modes.forEachIndexed { i, (k, label) ->
@@ -248,7 +248,7 @@ private fun MacPreferences(s: ServerSettings, ui: SettingsUi, actions: SettingsA
     OutlinedTextField(claudeModel, { claudeModel = it.trim() }, singleLine = true, label = { Text("Default Claude Code model ID (blank = CLI default)") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
     OutlinedTextField(codexModel, { codexModel = it.trim() }, singleLine = true, label = { Text("Default Codex model ID (blank = CLI default)") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
     if (s.allowedWorkspaces.isNotEmpty()) {
-        Text("Allowed workspaces (change on the Mac)", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
+        Text("Allowed workspaces (change on this device)", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
         s.allowedWorkspaces.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
     ui.settingsMessage?.let { Banner(it, Modifier.padding(top = 8.dp), isError = false) }
@@ -265,5 +265,5 @@ private fun MacPreferences(s: ServerSettings, ui: SettingsUi, actions: SettingsA
             )
         },
         enabled = !ui.settingsSaving, modifier = Modifier.padding(top = 12.dp),
-    ) { Text(if (ui.settingsSaving) "Saving…" else "Save on Mac") }
+    ) { Text(if (ui.settingsSaving) "Saving…" else "Save on device") }
 }

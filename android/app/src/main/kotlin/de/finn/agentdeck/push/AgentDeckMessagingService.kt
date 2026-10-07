@@ -14,11 +14,14 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import de.finn.agentdeck.AgentDeckApplication
 import de.finn.agentdeck.AppGraph
-import de.finn.agentdeck.core.api.ApiException
 import de.finn.agentdeck.core.model.Agents
 import de.finn.agentdeck.core.push.NotificationPlanner
+import de.finn.agentdeck.core.push.PushCrypto
 import de.finn.agentdeck.core.push.PushDecryptException
 import de.finn.agentdeck.core.push.PushPayload
+import de.finn.agentdeck.data.CredentialStore
+import de.finn.agentdeck.data.Credentials
+import de.finn.agentdeck.notify.NotificationTarget
 import de.finn.agentdeck.notify.Notifier
 import java.util.concurrent.TimeUnit
 
@@ -41,19 +44,43 @@ class AgentDeckMessagingService : FirebaseMessagingService() {
     companion object {
         private const val TAG = "AgentDeckPush"
 
-        /** Shared with tests: decrypt, gate and show. Returns the payload that was shown, if any. */
-        fun handle(graph: AppGraph, data: Map<String, String>, notifier: Notifier): PushPayload? {
-            val creds = graph.credentials.current() ?: return null
-            val payload = try {
-                PushPayload.open(creds.pushKey, data)
-            } catch (e: PushDecryptException) {
-                Log.w(TAG, "Dropped push: ${e.reason}") // reason only, never content
-                return null
-            }
-            if (!graph.notificationGate.shouldShow(payload, System.currentTimeMillis())) return null
+        /**
+         * Shared with tests: find the saved pairing whose key authenticates the push, gate and show.
+         * Works for every saved host, active or not. Returns the payload that was shown, if any.
+         */
+        fun handle(graph: AppGraph, data: Map<String, String>, notifier: Notifier, nowMillis: Long = System.currentTimeMillis()): PushPayload? {
+            val (creds, payload) = route(graph.credentials.usable(), data) ?: return null
+            val host = graph.credentials.host(creds.hostKey)?.takeIf { it.deviceId == creds.deviceId } ?: return null
+            val target = NotificationTarget(creds.hostKey, creds.deviceId, host.label)
+            if (!graph.notificationGate.shouldShow(payload, nowMillis, target.pairingKey)) return null
             val plan = NotificationPlanner.plan(payload) ?: return null
-            notifier.show(plan, Agents.displayName(payload.agent), creds.deviceId)
+            notifier.show(plan, Agents.displayName(payload.agent), target)
             return payload
+        }
+
+        /**
+         * Each pairing has its own random AES-256-GCM push key, so a successful authenticated
+         * decryption proves which saved pairing sent the push; no routing metadata is needed. At most
+         * [CredentialStore.MAX_HOSTS] keys are tried. Nothing from the payload is logged.
+         */
+        fun route(candidates: List<Credentials>, data: Map<String, String>): Pair<Credentials, PushPayload>? {
+            for (creds in candidates.take(CredentialStore.MAX_HOSTS)) {
+                val plain = try {
+                    PushCrypto.decrypt(creds.pushKey, data)
+                } catch (e: PushDecryptException) {
+                    if (e.reason == PushDecryptException.Reason.AUTHENTICATION_FAILED) continue
+                    Log.w(TAG, "Dropped push: ${e.reason}") // malformed for every key alike
+                    return null
+                }
+                return try {
+                    creds to PushPayload.parse(plain)
+                } catch (e: PushDecryptException) {
+                    Log.w(TAG, "Dropped push: ${e.reason}")
+                    null
+                }
+            }
+            if (candidates.isNotEmpty()) Log.w(TAG, "Dropped push: no saved pairing matches")
+            return null
         }
     }
 }
@@ -62,12 +89,13 @@ class AgentDeckMessagingService : FirebaseMessagingService() {
 class FcmTokenWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val graph = (applicationContext as AgentDeckApplication).graph
-        val creds = graph.credentials.current() ?: return Result.success()
-        return try {
-            graph.push.ensureRegistered(graph.repository, creds, force = true)
-            Result.success()
-        } catch (e: ApiException) {
-            if (e.isTransient && runAttemptCount < 8) Result.retry() else Result.failure()
+        // Every saved host gets the new token; one offline host doesn't stop the others. Hosts that
+        // already have this token are skipped on retries.
+        val failures = graph.push.ensureRegisteredAll(graph.repository, graph.credentials.usable())
+        return when {
+            failures.isEmpty() -> Result.success()
+            failures.any { it.isTransient } && runAttemptCount < 8 -> Result.retry()
+            else -> Result.failure()
         }
     }
 

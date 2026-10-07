@@ -27,6 +27,7 @@ from .common import (
     clean_text,
     clip,
     codex_home,
+    has_tty,
     is_within,
     iter_json_lines,
     norm_iso,
@@ -178,7 +179,7 @@ def live_processes(max_age: float = 10.0) -> dict:
         if _live_cache["value"] is not None and time.monotonic() - _live_cache["at"] < max_age:
             return _live_cache["value"]
         rows = PROCS.rows()
-        tui = [r for r in rows if r["tty"] not in ("??", "-", "") and _is_codex_tui(r["command"])]
+        tui = [r for r in rows if has_tty(r) and _is_codex_tui(r["command"])]
         # prefer native binaries (children of node launchers)
         by_thread: dict[str, dict] = {}
         unmapped: list[dict] = []

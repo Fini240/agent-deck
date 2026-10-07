@@ -59,7 +59,7 @@ fun PairingScreen(ui: PairingUi, actions: PairingActions, modifier: Modifier = M
     Column(modifier.fillMaxSize().imePadding()) {
         TopAppBar(
             navigationIcon = { if (ui.canGoBack) IconButton(onClick = actions.onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-            title = { Text("Pair with your Mac") },
+            title = { Text("Pair with your device") },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
@@ -68,7 +68,7 @@ fun PairingScreen(ui: PairingUi, actions: PairingActions, modifier: Modifier = M
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "On the Mac, run agentdeck-admin.sh pair. It shows a QR code with a one-time code that expires after a few minutes. " +
+                    "On your computer or server, run ad pair. It shows a QR code with a one-time code that expires after a few minutes. " +
                         "This phone needs Tailscale connected.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -79,7 +79,7 @@ fun PairingScreen(ui: PairingUi, actions: PairingActions, modifier: Modifier = M
                 OutlinedTextField(
                     value = ui.server, onValueChange = actions.onServer, singleLine = true,
                     label = { Text("Server address (https)") },
-                    placeholder = { Text("https://your-mac.tailnet.ts.net:8443") },
+                    placeholder = { Text("https://your-device.tailnet.ts.net:10443") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
                     modifier = Modifier.fillMaxWidth(),
                 )

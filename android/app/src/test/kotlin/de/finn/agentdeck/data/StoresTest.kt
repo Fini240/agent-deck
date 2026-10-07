@@ -94,9 +94,9 @@ class StoresTest {
 
     @Test
     fun replyWorkIsUniquePerSessionAndText() {
-        assertEquals(ReplyReceiver.uniqueName("d", "s", "yes"), ReplyReceiver.uniqueName("d", "s", "yes"))
-        assertNotEquals(ReplyReceiver.uniqueName("d", "s", "yes"), ReplyReceiver.uniqueName("d", "t", "yes"))
-        assertNotEquals(ReplyReceiver.uniqueName("d", "s", "yes"), ReplyReceiver.uniqueName("d", "s", "no"))
-        assertNotEquals(ReplyReceiver.uniqueName("d", "s", "yes"), ReplyReceiver.uniqueName("e", "s", "yes"))
+        assertEquals(ReplyReceiver.uniqueName("https://mac.ts.net", "d", "s", "yes"), ReplyReceiver.uniqueName("https://mac.ts.net", "d", "s", "yes"))
+        assertNotEquals(ReplyReceiver.uniqueName("https://mac.ts.net", "d", "s", "yes"), ReplyReceiver.uniqueName("https://mac.ts.net", "d", "t", "yes"))
+        assertNotEquals(ReplyReceiver.uniqueName("https://mac.ts.net", "d", "s", "yes"), ReplyReceiver.uniqueName("https://mac.ts.net", "d", "s", "no"))
+        assertNotEquals(ReplyReceiver.uniqueName("https://mac.ts.net", "d", "s", "yes"), ReplyReceiver.uniqueName("https://mac.ts.net", "e", "s", "yes"))
     }
 }

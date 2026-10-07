@@ -22,6 +22,8 @@ test = ["pytest>=8", "httpx>=0.27"]
 [project.scripts]
 agentdeck-server = "agentdeck.__main__:main"
 agentdeck-admin = "agentdeck.admin:main"
+agentdeck = "agentdeck.cli:main"
+ad = "agentdeck.cli:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "agentdeck.__version__" }

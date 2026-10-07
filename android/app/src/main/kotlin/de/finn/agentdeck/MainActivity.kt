@@ -102,6 +102,14 @@ class MainActivity : ComponentActivity() {
             intent == null -> Unit
             intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "agentdeck" -> vm.onPairingLink(intent.dataString.orEmpty())
             intent.action == ACTION_OPEN_SESSION -> intent.getStringExtra(EXTRA_SESSION_ID)?.let { id ->
+                val host = intent.getStringExtra(EXTRA_HOST)
+                val device = intent.getStringExtra(EXTRA_DEVICE)
+                // Legacy opens cannot prove their host; open the list instead of a wrong chat.
+                if (host == null || device == null || graph.credentials.pairing(host, device) == null) {
+                    vm.select(null)
+                    return
+                }
+                vm.selectHost(host)
                 // The encrypted test push uses a synthetic session id; open the list instead.
                 vm.select(id.takeUnless { it == NotificationPlanner.TEST_SESSION_ID })
             }
@@ -129,6 +137,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_OPEN_SESSION = "de.finn.agentdeck.action.OPEN_SESSION"
+        const val EXTRA_HOST = "host"
+        const val EXTRA_DEVICE = "device_id"
         const val EXTRA_SESSION_ID = "session_id"
     }
 }

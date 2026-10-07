@@ -79,6 +79,9 @@ fun AdaptiveHome(
 
 @Composable
 fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPermission: () -> Unit, onOpenNotificationSettings: () -> Unit, onInstallUpdate: () -> Unit = {}) {
+    val hosts by graph.credentials.hosts.collectAsStateWithLifecycle()
+    val active by graph.credentials.active.collectAsStateWithLifecycle()
+    val identity by graph.credentials.credentials.collectAsStateWithLifecycle()
     val nav by vm.nav.collectAsStateWithLifecycle()
     val update by graph.updates.state.collectAsStateWithLifecycle()
     BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()) {
@@ -115,6 +118,7 @@ fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPer
             Screen.HOME -> {
                 val list by vm.list.collectAsStateWithLifecycle()
                 Column(Modifier.fillMaxSize()) {
+                    HostPicker(hosts, active, vm::selectHost, { vm.open(Screen.PAIRING) }, vm::renameHost, vm::removeHost)
                     if (update.updateAvailable) {
                         TextButton(onClick = { vm.open(Screen.SETTINGS) }, modifier = Modifier) {
                             Text("App update ${update.offer?.version.orEmpty()} available · View update")
@@ -151,8 +155,8 @@ fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPer
 @Composable
 private fun DetailRoute(graph: AppGraph, sessionId: String, onBack: (() -> Unit)?, onOpen: (String) -> Unit) {
     val dvm: DetailViewModel = viewModel(
-        key = "detail:$sessionId",
-        factory = viewModelFactory { initializer { DetailViewModel(sessionId, graph.repository, graph.drafts) } },
+        key = "detail:${graph.credentials.current()?.pairingKey}:$sessionId",
+        factory = viewModelFactory { initializer { DetailViewModel(sessionId, graph.repository, graph.drafts, graph.credentials.current()) } },
     )
     val ui by dvm.ui.collectAsStateWithLifecycle()
     SessionDetailPane(

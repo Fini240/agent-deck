@@ -65,7 +65,7 @@ class PairingAndDraftRaceTest {
             Thread.sleep(10)
         }
         assertFalse(vm.ui.value.sending)
-        assertEquals("second message", drafts.get("s1").text)
+        assertEquals("second message", drafts.get(DraftStore.key(identity.value!!.hostKey, "s1", identity.value!!.pairingKey)).text)
         assertEquals("second message", vm.ui.value.draft)
     }
 
@@ -84,7 +84,7 @@ class PairingAndDraftRaceTest {
         val oldIdentity = identities.value!!
         identities.value = creds("mac-b.ts.net", "dev-b")
         try { old.sessions(); fail("stale client used") } catch (_: ApiException.NotPaired) { }
-        try { repo.callFor(oldIdentity) { sessions() }; fail("stale work used") } catch (_: ApiException.NotPaired) { }
+        try { repo.callFor(oldIdentity) { sessions() }; fail("stale work used") } catch (_: ApiException.HostChanged) { }
         repo.call { sessions() }
         assertEquals(listOf("mac-b.ts.net"), hosts)
         assertEquals(listOf("Bearer token-dev-b"), tokens)

@@ -52,6 +52,8 @@ class AgentDeckRepository(
     private val http: OkHttpClient = AgentDeckClient.defaultHttpClient(),
     private val pollIntervalMillis: Long = 10_000,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Whether a pairing is still saved (active or not). Defaults to "is the active pairing". */
+    private val isSaved: (Credentials) -> Boolean = { credentials.value == it },
 ) {
     private val _sessions = MutableStateFlow(SessionsState())
     val sessions: StateFlow<SessionsState> = _sessions.asStateFlow()
@@ -65,7 +67,7 @@ class AgentDeckRepository(
 
     private var liveJob: Job? = null
     private var cachedClient: Pair<Credentials, AgentDeckClient>? = null
-    private val refreshLock = Mutex()
+    private var refreshLock = Mutex()
 
     fun client(): AgentDeckClient {
         val creds = credentials.value ?: throw ApiException.NotPaired()
@@ -86,15 +88,31 @@ class AgentDeckRepository(
 
     /** Binds delayed work to its original pairing, including across suspension points. */
     suspend fun <T> callFor(identity: Credentials, block: suspend AgentDeckClient.() -> T): T {
-        if (credentials.value != identity) throw ApiException.NotPaired()
+        if (credentials.value != identity) throw ApiException.HostChanged()
         val bound = AgentDeckClient(identity.server, { identity.token.takeIf { credentials.value == identity } }, http)
         return try {
-            bound.block()
+            bound.block().also { if (credentials.value != identity) throw ApiException.HostChanged() }
         } catch (e: ApiException.Unauthorized) {
             if (credentials.value == identity) _connection.value = Connection.Unauthorized(e.message ?: "Pair again.")
             throw e
         }
     }
+
+    /**
+     * For background work bound to a saved pairing that may not be active (notification replies,
+     * push registration): the token only leaves the phone while exactly that pairing is still saved,
+     * and only towards its own host. Never touches the active host's connection state.
+     */
+    suspend fun <T> callSaved(identity: Credentials, block: suspend AgentDeckClient.() -> T): T {
+        if (!isSaved(identity)) throw ApiException.NotPaired()
+        val bound = AgentDeckClient(identity.server, { identity.token.takeIf { isSaved(identity) } }, http)
+        return bound.block().also { if (!isSaved(identity)) throw ApiException.NotPaired() }
+    }
+
+    fun currentIdentity(): Credentials? = credentials.value
+
+    /** True while [identity] is the active pairing. */
+    fun isActive(identity: Credentials): Boolean = credentials.value == identity
 
     suspend fun refreshSessions() {
         if (credentials.value == null) {
@@ -174,6 +192,7 @@ class AgentDeckRepository(
         pendingRefresh?.cancel()
         pendingRefresh = null
         cachedClient = null
+        refreshLock = Mutex()
         _sessions.value = SessionsState()
         _connection.value = if (credentials.value == null) Connection.NotPaired else Connection.Paused
         if (foreground) startLive()

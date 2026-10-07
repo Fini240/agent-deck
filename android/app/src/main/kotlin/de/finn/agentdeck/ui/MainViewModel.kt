@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import de.finn.agentdeck.AppGraph
 import de.finn.agentdeck.BuildConfig
 import de.finn.agentdeck.data.PinnedChats
+import de.finn.agentdeck.data.HostKeys
 import de.finn.agentdeck.core.api.AgentDeckClient
 import de.finn.agentdeck.core.api.ApiException
 import de.finn.agentdeck.core.api.PairingLink
@@ -57,16 +58,21 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
         val pinnedOnly: Boolean = false,
         val pinRevision: Int = 0,
     )
-    private val listPrefs = MutableStateFlow(
-        ListPrefs(
-            uiPrefs.getString("filter", "all")?.takeIf { it == "all" || it == Agents.CLAUDE || it == Agents.CODEX } ?: "all",
-            ActivityFilter.entries.firstOrNull { it.name == uiPrefs.getString("activity", "ALL") } ?: ActivityFilter.ALL,
-            uiPrefs.getStringSet("expanded", emptySet()).orEmpty().toSet(),
-            if (uiPrefs.getString("scope", "OPEN") == "ALL") BrowserScope.ALL else BrowserScope.OPEN,
-            uiPrefs.getStringSet("collapsedFolders", emptySet()).orEmpty().toSet(),
-            pinnedOnly = uiPrefs.getBoolean("pinnedOnly", false),
-        ),
-    )
+    private fun loadPrefs(): ListPrefs {
+        val prefix = graph.credentials.current()?.hostKey?.let { HostKeys.host(it) + ":" }.orEmpty()
+        // Only the proven old Mac may inherit the old single-host list preferences.
+        val useLegacy = uiPrefs.getString("legacy_list_host", null) == graph.credentials.current()?.hostKey
+        fun k(name: String): String = if (useLegacy && !uiPrefs.contains(prefix + name)) name else prefix + name
+        return ListPrefs(
+            uiPrefs.getString(k("filter"), "all") ?: "all",
+            ActivityFilter.entries.firstOrNull { it.name == uiPrefs.getString(k("activity"), "ALL") } ?: ActivityFilter.ALL,
+            uiPrefs.getStringSet(k("expanded"), emptySet()).orEmpty().toSet(),
+            if (uiPrefs.getString(k("scope"), "OPEN") == "ALL") BrowserScope.ALL else BrowserScope.OPEN,
+            uiPrefs.getStringSet(k("collapsedFolders"), emptySet()).orEmpty().toSet(),
+            pinnedOnly = uiPrefs.getBoolean(k("pinnedOnly"), false),
+        )
+    }
+    private val listPrefs = MutableStateFlow(loadPrefs())
 
     val list: StateFlow<SessionListUi> = combine(repo.sessions, repo.connection, listPrefs, _nav, graph.credentials.credentials) { s, c, p, n, cr ->
         SessionListUi(
@@ -77,6 +83,36 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
             pinned = pins.get(cr?.server?.value), pinnedOnly = p.pinnedOnly,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionListUi())
+
+    private var shownIdentity = graph.credentials.current()
+    init {
+        viewModelScope.launch {
+            graph.credentials.credentials.collect { current ->
+                if (shownIdentity != current) {
+                    shownIdentity = current
+                    _nav.value = NavState(if (current == null) Screen.PAIRING else Screen.HOME)
+                    listPrefs.value = loadPrefs()
+                    _settings.value = SettingsUi(appVersion = BuildConfig.VERSION_NAME)
+                    _newSession.value = NewSessionUi()
+                    startRequestId = null
+                }
+            }
+        }
+    }
+
+    fun selectHost(key: String) {
+        if (graph.selectHost(key)) {
+            shownIdentity = graph.credentials.current()
+            _nav.value = NavState(Screen.HOME)
+            listPrefs.value = loadPrefs()
+            _settings.value = SettingsUi(appVersion = BuildConfig.VERSION_NAME)
+            _newSession.value = NewSessionUi()
+            startRequestId = null
+        }
+    }
+
+    fun renameHost(key: String, label: String) { graph.credentials.rename(key, label) }
+    fun removeHost(key: String) { graph.removeHost(key) }
 
     // ---- Navigation -------------------------------------------------------------------
 
@@ -131,13 +167,14 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
 
     private fun savePrefs(p: ListPrefs) {
         listPrefs.value = p
+        val prefix = graph.credentials.current()?.hostKey?.let { HostKeys.host(it) + ":" }.orEmpty()
         uiPrefs.edit {
-            putString("filter", p.filter)
-            putString("activity", p.activity.name)
-            putStringSet("expanded", p.expanded)
-            putString("scope", p.scope.name)
-            putStringSet("collapsedFolders", p.collapsedFolders)
-            putBoolean("pinnedOnly", p.pinnedOnly)
+            putString(prefix + "filter", p.filter)
+            putString(prefix + "activity", p.activity.name)
+            putStringSet(prefix + "expanded", p.expanded)
+            putString(prefix + "scope", p.scope.name)
+            putStringSet(prefix + "collapsedFolders", p.collapsedFolders)
+            putBoolean(prefix + "pinnedOnly", p.pinnedOnly)
         }
     }
 
@@ -170,21 +207,29 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
         val p = _pairing.value
         if (p.busy) return
         val server = ServerUrl.parse(p.server).getOrElse { e -> _pairing.update { it.copy(error = e.message) }; return }
+        if (graph.credentials.host(server.value) == null && graph.credentials.hosts.value.size >= de.finn.agentdeck.data.CredentialStore.MAX_HOSTS) {
+            _pairing.update { it.copy(error = "Remove a saved device before adding another (maximum 8).") }
+            return
+        }
+        val previousPairing = graph.credentials.host(server.value)
         _pairing.update { it.copy(busy = true, error = null) }
         viewModelScope.launch {
             try {
                 val fcm = graph.push.tokenForPairing()
                 val res = AgentDeckClient(server, { null }).pair(PairRequest(p.code, p.deviceName.ifBlank { "Android" }, fcm))
+                previousPairing?.let { graph.notifier.cancelPairing(it.pairingKey) }
                 graph.credentials.save(server, res.serverName, res.deviceId, res.token, res.pushKey)
                 val creds = graph.credentials.current()!!
-                if (fcm != null) graph.push.markRegisteredViaPairing(creds, fcm) else graph.push.forget()
+                if (fcm != null) graph.push.markRegisteredViaPairing(creds, fcm) else graph.push.forget(creds.pairingKey)
                 graph.onPaired()
                 _pairing.update { PairingUi(deviceName = it.deviceName) }
                 _nav.value = NavState(Screen.HOME)
             } catch (e: ApiException) {
                 _pairing.update { it.copy(busy = false, error = e.message) }
+            } catch (e: IllegalStateException) {
+                _pairing.update { it.copy(busy = false, error = e.message) }
             } catch (e: IllegalArgumentException) {
-                _pairing.update { it.copy(busy = false, error = "The Mac sent invalid pairing data: ${e.message}") }
+                _pairing.update { it.copy(busy = false, error = "The device sent invalid pairing data: ${e.message}") }
             }
         }
     }
@@ -197,6 +242,7 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
     }.stateIn(viewModelScope, SharingStarted.Eagerly, _settings.value)
 
     fun refreshSettingsScreen() {
+        val identity = graph.credentials.current() ?: return
         graph.updates.check()
         graph.push.setPermissionGranted(graph.notifier.canPost())
         _settings.update {
@@ -208,15 +254,16 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
         }
         viewModelScope.launch {
             try {
-                val st = repo.call { status() }
+                val st = repo.callFor(identity) { status() }
                 _settings.update { it.copy(serverStatus = st, statusLoading = false) }
             } catch (e: ApiException) {
+                if (!repo.isActive(identity)) return@launch
                 _settings.update { it.copy(statusError = e.message, statusLoading = false) }
             }
         }
         viewModelScope.launch {
             try {
-                val s = repo.call { settings() }.settings
+                val s = repo.callFor(identity) { settings() }.settings
                 _settings.update { it.copy(serverSettings = s) }
             } catch (_: ApiException) {
                 // Shown via statusError from the parallel status call.
@@ -232,20 +279,22 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
     }
 
     fun pushTest() {
+        val identity = graph.credentials.current() ?: return
         _settings.update { it.copy(testing = true, testMessage = null) }
         viewModelScope.launch {
             val msg = try {
-                val r = repo.call { pushTest() }.result
+                val r = repo.callFor(identity) { pushTest() }.result
                 when {
-                    r.ok > 0 -> "The Mac handed an encrypted test to Google's push service. It worked if a \"Encrypted test notification\" appears in a few seconds."
-                    r.skipped > 0 -> "The Mac has no push token for this phone yet. Tap \"Register again\"."
+                    r.ok > 0 -> "The device handed an encrypted test to Google's push service. It worked if a \"Encrypted test notification\" appears in a few seconds."
+                    r.skipped > 0 -> "The device has no push token for this phone yet. Tap \"Register again\"."
                     r.unregistered > 0 -> "Google rejected this phone's token as expired. Tap \"Register again\"."
-                    r.unavailable > 0 -> "The Mac's push sender is not configured."
-                    else -> "The Mac could not send the test (errors: ${r.error})."
+                    r.unavailable > 0 -> "The device's push sender is not configured."
+                    else -> "The device could not send the test (errors: ${r.error})."
                 }
             } catch (e: ApiException) {
                 e.message ?: "Test failed."
             }
+            if (!repo.isActive(identity)) return@launch
             _settings.update { it.copy(testing = false, testMessage = msg) }
             refreshSettingsScreen()
         }
@@ -259,17 +308,19 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
             } catch (_: ApiException) {
                 // PushStatus carries the error.
             }
-            refreshSettingsScreen()
+            if (repo.isActive(creds)) refreshSettingsScreen()
         }
     }
 
     fun saveSettings(patch: SettingsPatch) {
+        val identity = graph.credentials.current() ?: return
         _settings.update { it.copy(settingsSaving = true, settingsMessage = null) }
         viewModelScope.launch {
             try {
-                val s = repo.call { patchSettings(patch) }.settings
-                _settings.update { it.copy(serverSettings = s, settingsSaving = false, settingsMessage = "Saved on the Mac.") }
+                val s = repo.callFor(identity) { patchSettings(patch) }.settings
+                _settings.update { it.copy(serverSettings = s, settingsSaving = false, settingsMessage = "Saved on the device.") }
             } catch (e: ApiException) {
+                if (!repo.isActive(identity)) return@launch
                 _settings.update { it.copy(settingsSaving = false, settingsMessage = "Not saved: ${e.message}") }
             }
         }
@@ -279,12 +330,13 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
         val creds = graph.credentials.current()
         viewModelScope.launch {
             val note = try {
-                if (creds != null) repo.call { unpair(creds.deviceId) }
+                if (creds != null) repo.callSaved(creds) { unpair(creds.deviceId) }
                 null
             } catch (e: ApiException) {
-                "Removed here. The Mac could not be told (${e.message}); revoke it there with agentdeck-admin.sh revoke."
+                "Removed here. The device could not be told (${e.message}); revoke it there with agentdeck-admin.sh revoke."
             }
-            graph.forgetPairing()
+            if (creds != null) graph.removeHost(creds.hostKey, creds.deviceId)
+            if (graph.credentials.current() != null) { _nav.value = NavState(Screen.HOME); return@launch }
             _settings.value = SettingsUi(appVersion = BuildConfig.VERSION_NAME)
             _pairing.update { it.copy(notice = note, canGoBack = false) }
             _nav.value = NavState(Screen.PAIRING)
@@ -298,11 +350,12 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
     private var startRequestId: String? = null
 
     private fun prepareNewSession() {
+        val identity = graph.credentials.current() ?: return
         _newSession.update { it.copy(error = null) }
-        viewModelScope.launch { loadModels(refresh = false) }
+        viewModelScope.launch { loadModels(refresh = false, identity = identity) }
         viewModelScope.launch {
             try {
-                val s = repo.call { settings() }.settings
+                val s = repo.callFor(identity) { settings() }.settings
                 _newSession.update { ui ->
                     val agent = s.defaultAgent ?: ui.agent
                     ui.copy(
@@ -316,14 +369,19 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
         }
     }
 
-    fun refreshModels() = viewModelScope.launch { loadModels(refresh = true) }
+    fun refreshModels() {
+        val identity = graph.credentials.current() ?: return
+        viewModelScope.launch { loadModels(refresh = true, identity = identity) }
+    }
 
-    private suspend fun loadModels(refresh: Boolean) {
+    private suspend fun loadModels(refresh: Boolean, identity: de.finn.agentdeck.data.Credentials) {
+        if (!repo.isActive(identity)) return
         _newSession.update { it.copy(modelsLoading = true, modelsError = null) }
         try {
-            val m: ModelsResponse = repo.call { if (refresh) refreshModels() else models() }
+            val m: ModelsResponse = repo.callFor(identity) { if (refresh) refreshModels() else models() }
             _newSession.update { it.copy(agents = m.agents, modelsRefreshedAt = m.refreshedAt, modelsLoading = false) }
         } catch (e: ApiException) {
+            if (!repo.isActive(identity)) return
             _newSession.update { it.copy(modelsLoading = false, modelsError = "Couldn't load models: ${e.message} You can still type an exact model ID.") }
         }
     }
@@ -335,18 +393,21 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
     fun setNewPrompt(v: String) = _newSession.update { it.copy(prompt = v) }.also { startRequestId = null }
 
     fun startSession() {
+        val identity = graph.credentials.current() ?: return
         val ui = _newSession.value
         if (!ui.canStart) return
         val rid = startRequestId ?: UUID.randomUUID().toString().also { startRequestId = it }
         _newSession.update { it.copy(starting = true, error = null) }
         viewModelScope.launch {
             try {
-                val s = repo.call { startSession(StartSessionRequest(ui.agent, ui.modelToSend, ui.cwd.trim(), ui.prompt.trim(), rid)) }.session
+                val s = repo.callFor(identity) { startSession(StartSessionRequest(ui.agent, ui.modelToSend, ui.cwd.trim(), ui.prompt.trim(), rid)) }.session
                 startRequestId = null
                 _newSession.update { NewSessionUi(agents = it.agents, workspaces = it.workspaces, agent = it.agent, cwd = it.cwd, defaultModel = it.defaultModel) }
                 repo.refreshSessions()
+                if (!repo.isActive(identity)) return@launch
                 _nav.value = NavState(Screen.HOME, s.id)
             } catch (e: ApiException) {
+                if (!repo.isActive(identity)) return@launch
                 _newSession.update { it.copy(starting = false, error = e.message) }
             }
         }

@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -54,7 +56,9 @@ def norm_iso(value: Any, fallback: float | None = None) -> str:
 
 
 def claude_home() -> Path:
-    return Path(os.environ.get("AGENTDECK_CLAUDE_HOME") or Path.home() / ".claude")
+    # CLAUDE_CONFIG_DIR is Claude Code's own override (mirrors CODEX_HOME for Codex below)
+    return Path(os.environ.get("AGENTDECK_CLAUDE_HOME") or os.environ.get("CLAUDE_CONFIG_DIR")
+                or Path.home() / ".claude")
 
 
 def codex_home() -> Path:
@@ -176,6 +180,105 @@ def pid_alive(pid: Any) -> bool:
     return True
 
 
+# Linux: read-only procfs instead of ps/lsof (lsof is often missing in containers and needs
+# no extra privileges here either). Tests point PROC_ROOT at a fake tree.
+PROC_ROOT = Path("/proc")
+MAX_PROC_ROWS = 20000
+MAX_FDS_PER_PROCESS = 4096
+NO_TTY = "??"  # macOS ps spelling; Linux ps prints "?", procfs rows use this constant
+
+
+def procfs_available() -> bool:
+    return sys.platform.startswith("linux") and (PROC_ROOT / "self" / "stat").exists()
+
+
+def has_tty(row: dict) -> bool:
+    return str(row.get("tty") or "") not in ("", "?", "??", "-")
+
+
+def _tty_name(tty_nr: int) -> str:
+    """Name of a controlling terminal from /proc/<pid>/stat ``tty_nr`` (ps-compatible, best effort)."""
+    if tty_nr <= 0:
+        return NO_TTY
+    major = (tty_nr >> 8) & 0xFFF
+    minor = (tty_nr & 0xFF) | ((tty_nr >> 12) & 0xFFF00)
+    if 136 <= major <= 143:  # Unix98 pseudo terminals
+        return f"pts/{(major - 136) * 256 + minor}"
+    if major == 4:
+        return f"tty{minor}" if minor < 64 else f"ttyS{minor - 64}"
+    return f"tty({major},{minor})"
+
+
+def _proc_stat(pid_dir: Path) -> tuple[int, int] | None:
+    """(ppid, tty_nr) from /proc/<pid>/stat; the comm field may contain spaces and parens."""
+    try:
+        raw = (pid_dir / "stat").read_bytes()
+    except OSError:
+        return None
+    end = raw.rfind(b")")
+    if end < 0:
+        return None
+    fields = raw[end + 2:].split()
+    try:
+        return int(fields[1]), int(fields[4])  # state, ppid, pgrp, session, tty_nr
+    except (IndexError, ValueError):
+        return None
+
+
+def _proc_command(pid_dir: Path) -> str:
+    try:
+        raw = (pid_dir / "cmdline").read_bytes()[:65536]
+    except OSError:
+        raw = b""
+    args = [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
+    if args:
+        return " ".join(args)
+    try:  # kernel threads / zombies: ps shows [comm]
+        return "[" + (pid_dir / "comm").read_text(errors="replace").strip() + "]"
+    except OSError:
+        return ""
+
+
+def proc_rows() -> list[dict]:
+    """Process table straight from procfs; vanished or unreadable processes are skipped."""
+    rows: list[dict] = []
+    try:
+        entries = os.listdir(PROC_ROOT)
+    except OSError:
+        return rows
+    for name in entries:
+        if not name.isdigit():
+            continue
+        pid_dir = PROC_ROOT / name
+        stat = _proc_stat(pid_dir)
+        if stat is None:
+            continue
+        rows.append({"pid": int(name), "ppid": stat[0], "tty": _tty_name(stat[1]), "command": _proc_command(pid_dir)})
+        if len(rows) >= MAX_PROC_ROWS:
+            break
+    return rows
+
+
+def _ps_rows() -> list[dict]:
+    rows: list[dict] = []
+    try:
+        out = subprocess.run(
+            ["ps", "-axww", "-o", "pid=,ppid=,tty=,command="],
+            capture_output=True, text=True, timeout=5, check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    for line in out.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 4:
+            continue
+        try:
+            rows.append({"pid": int(parts[0]), "ppid": int(parts[1]), "tty": parts[2], "command": parts[3]})
+        except ValueError:
+            continue
+    return rows
+
+
 class _ProcCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -186,22 +289,9 @@ class _ProcCache:
         with self._lock:
             if time.monotonic() - self._at < max_age:
                 return self._rows
-            rows: list[dict] = []
-            try:
-                out = subprocess.run(
-                    ["ps", "-axww", "-o", "pid=,ppid=,tty=,command="],
-                    capture_output=True, text=True, timeout=5, check=False,
-                ).stdout
-            except (OSError, subprocess.SubprocessError):
-                out = ""
-            for line in out.splitlines():
-                parts = line.split(None, 3)
-                if len(parts) < 4:
-                    continue
-                try:
-                    rows.append({"pid": int(parts[0]), "ppid": int(parts[1]), "tty": parts[2], "command": parts[3]})
-                except ValueError:
-                    continue
+            rows = proc_rows() if procfs_available() else []
+            if not rows:
+                rows = _ps_rows()
             self._rows = rows
             self._at = time.monotonic()
             return rows
@@ -229,8 +319,42 @@ def descendants(root_pid: int, rows: list[dict] | None = None) -> list[dict]:
     return out
 
 
+def _proc_pid_dir(pid: Any) -> Path | None:
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    return PROC_ROOT / str(pid) if pid > 0 else None
+
+
+def _proc_open_files(pid_dir: Path) -> list[str] | None:
+    """Absolute paths behind /proc/<pid>/fd; None when procfs can't answer (gone / not permitted)."""
+    fd_dir = pid_dir / "fd"
+    try:
+        names = os.listdir(fd_dir)
+    except OSError:  # vanished, or another user's process without ptrace rights
+        return None
+    out: list[str] = []
+    for name in names[:MAX_FDS_PER_PROCESS]:
+        try:
+            target = os.readlink(fd_dir / name)
+        except OSError:
+            continue
+        # sockets/pipes/anon inodes are "socket:[123]" etc.; deleted files can't be read anyway
+        if target.startswith("/") and not target.endswith(" (deleted)"):
+            out.append(target)
+    return out
+
+
 def open_files(pid: int) -> list[str]:
-    """Paths of regular files a process has open (lsof, bounded)."""
+    """Paths of files a process has open (procfs on Linux, else lsof; bounded, read-only)."""
+    if procfs_available():
+        pid_dir = _proc_pid_dir(pid)
+        if pid_dir is None:
+            return []
+        found = _proc_open_files(pid_dir)
+        if found is not None or not shutil.which("lsof"):
+            return found or []
     try:
         out = subprocess.run(
             ["lsof", "-n", "-P", "-w", "-p", str(int(pid)), "-Fn"],
@@ -242,6 +366,15 @@ def open_files(pid: int) -> list[str]:
 
 
 def process_cwd(pid: int) -> str | None:
+    if procfs_available():
+        pid_dir = _proc_pid_dir(pid)
+        if pid_dir is None:
+            return None
+        try:
+            target = os.readlink(pid_dir / "cwd")
+        except OSError:  # vanished or not permitted; lsof could not do better
+            return None
+        return target if target.startswith("/") and not target.endswith(" (deleted)") else None
     try:
         out = subprocess.run(
             ["lsof", "-n", "-P", "-w", "-a", "-p", str(int(pid)), "-d", "cwd", "-Fn"],

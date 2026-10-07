@@ -29,9 +29,30 @@ class AppGraph(
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 ) {
     val updates = de.finn.agentdeck.update.AppUpdates(context, credentials, scope)
-    val repository = AgentDeckRepository(credentials.credentials, scope)
+    val repository = AgentDeckRepository(credentials.credentials, scope, isSaved = credentials::isSaved)
     val notificationGate = NotificationGate(store = PrefsGateStore(context.getSharedPreferences("notification_gate", Context.MODE_PRIVATE)))
     val notifier = Notifier(context)
+
+    init {
+        credentials.pendingLegacyUiMigration()?.let { host ->
+            credentials.host(host)?.credentials?.let { old ->
+                if (old.deviceId != credentials.pendingLegacyUiDevice()) {
+                    credentials.markLegacyUiMigrated()
+                    return@let
+                }
+                context.getSharedPreferences("ui", Context.MODE_PRIVATE).edit(commit = true) { putString("legacy_list_host", host) }
+                drafts.migrateLegacy(host, old.pairingKey)
+                credentials.markLegacyUiMigrated()
+            }
+        }
+        scope.launch {
+            credentials.credentials.collect {
+                updates.check()
+                repository.onCredentialsChanged(foreground)
+                push.restore(it)
+            }
+        }
+    }
 
     @Volatile var foreground: Boolean = false
         private set
@@ -51,29 +72,30 @@ class AppGraph(
     }
 
     fun registerPushIfPaired() {
-        val creds = credentials.current() ?: return
-        scope.launch {
-            try {
-                push.ensureRegistered(repository, creds)
-            } catch (_: ApiException) {
-                // Status flow carries the error for Settings.
-            }
+        credentials.usable().forEach { creds ->
+            scope.launch { try { push.ensureRegistered(repository, creds) } catch (_: ApiException) { } }
         }
     }
 
     fun onPaired() {
         // Notifications of a previous pairing would offer replies through the wrong device.
-        notifier.cancelAll()
         updates.check()
         repository.onCredentialsChanged(foreground)
         registerPushIfPaired()
     }
 
     fun forgetPairing() {
-        credentials.clear()
-        push.forget()
-        notifier.cancelAll()
+        val old = credentials.current() ?: return
+        removeHost(old.hostKey)
         repository.onCredentialsChanged(foreground)
+    }
+    fun selectHost(key: String): Boolean = credentials.select(key)
+
+    fun removeHost(key: String, expectedDeviceId: String? = null) {
+        if (expectedDeviceId != null && credentials.host(key)?.deviceId != expectedDeviceId) return
+        val removed = credentials.remove(key) ?: return
+        push.forget(removed.pairingKey)
+        notifier.cancelPairing(removed.pairingKey)
     }
 }
 

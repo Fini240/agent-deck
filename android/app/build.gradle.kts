@@ -21,8 +21,8 @@ android {
         applicationId = "de.finn.agentdeck"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.2.3"
+        versionCode = 7
+        versionName = "0.3.0"
         buildConfigField("boolean", "PUSH_CONFIGURED", pushConfigured.toString())
         manifestPlaceholders["pushEnabled"] = pushConfigured.toString()
     }

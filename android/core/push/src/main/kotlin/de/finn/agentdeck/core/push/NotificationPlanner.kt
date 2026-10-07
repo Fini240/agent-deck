@@ -122,6 +122,7 @@ interface GateStore {
  * sends them from a thread pool), so a delayed progress message must never overwrite a
  * completion that already arrived, and an older result must not replace a newer one. FCM often
  * starts a fresh process per message, so the per-session state is persisted via [store].
+ * Callers with several hosts pass a per-pairing scope so their IDs never collide.
  */
 class NotificationGate(
     private val maxRemembered: Int = 200,
@@ -147,8 +148,11 @@ class NotificationGate(
     }
 
     @Synchronized
-    fun shouldShow(p: PushPayload, nowMillis: Long): Boolean {
-        if (!seen.add(p.eventId)) return false
+    fun shouldShow(p: PushPayload, nowMillis: Long, scope: String = ""): Boolean {
+        // Same event or session IDs from two hosts/pairings are different things: key by [scope].
+        val session = if (scope.isEmpty()) p.sessionId else "$scope|${p.sessionId}"
+        val event = if (scope.isEmpty()) p.eventId else "$scope|${p.eventId}"
+        if (!seen.add(event)) return false
         while (seen.size > maxRemembered) seen.remove(seen.first())
         val ts = parseInstant(p.timestamp)
         if (p.kind == PushKind.PROGRESS && ts != null && nowMillis - ts.toEpochMilli() > (p.validForSeconds ?: 180).coerceIn(60, 7260) * 1000) {
@@ -157,30 +161,30 @@ class NotificationGate(
         }
         val show = when (p.kind) {
             PushKind.PROGRESS -> {
-                val terminal = lastTerminal[p.sessionId]
-                val newest = lastProgressTs[p.sessionId]
-                val last = lastProgressShown[p.sessionId]
-                val stageChanged = lastProgressStage[p.sessionId] != p.stage
+                val terminal = lastTerminal[session]
+                val newest = lastProgressTs[session]
+                val last = lastProgressShown[session]
+                val stageChanged = lastProgressStage[session] != p.stage
                 when {
                     terminal != null && (ts == null || !ts.isAfter(terminal)) -> false
                     ts != null && newest != null && ts.isBefore(newest) -> false
                     last != null && !stageChanged && nowMillis - last < minProgressIntervalMillis -> false
                     else -> {
-                        lastProgressShown[p.sessionId] = nowMillis
-                        lastProgressStage[p.sessionId] = p.stage
-                        if (ts != null) put(lastProgressTs, p.sessionId, ts)
+                        lastProgressShown[session] = nowMillis
+                        lastProgressStage[session] = p.stage
+                        if (ts != null) put(lastProgressTs, session, ts)
                         true
                     }
                 }
             }
             PushKind.COMPLETED, PushKind.ERROR, PushKind.INPUT -> {
-                val terminal = lastTerminal[p.sessionId]
-                val newestProgress = lastProgressTs[p.sessionId]
+                val terminal = lastTerminal[session]
+                val newestProgress = lastProgressTs[session]
                 if (ts != null && ((terminal != null && ts.isBefore(terminal)) || (newestProgress != null && ts.isBefore(newestProgress)))) {
                     false
                 } else {
-                    if (ts != null) put(lastTerminal, p.sessionId, ts)
-                    lastProgressShown.remove(p.sessionId)
+                    if (ts != null) put(lastTerminal, session, ts)
+                    lastProgressShown.remove(session)
                     true
                 }
             }

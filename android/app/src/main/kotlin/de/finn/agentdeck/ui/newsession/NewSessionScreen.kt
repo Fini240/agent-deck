@@ -112,7 +112,7 @@ fun NewSessionScreen(ui: NewSessionUi, actions: NewSessionActions, modifier: Mod
                     }
                 }
                 ui.currentAgent?.let { a ->
-                    if (!a.available) Banner("${Agents.displayName(a.id)} is not available on the Mac${a.error?.let { ": $it" } ?: "."}", Modifier.padding(top = 8.dp))
+                    if (!a.available) Banner("${Agents.displayName(a.id)} is not available on this device${a.error?.let { ": $it" } ?: "."}", Modifier.padding(top = 8.dp))
                     else a.version?.let { Text("Installed: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }
                 }
 
@@ -123,7 +123,7 @@ fun NewSessionScreen(ui: NewSessionUi, actions: NewSessionActions, modifier: Mod
                 val a = ui.currentAgent
                 Text(
                     buildString {
-                        append(if (a?.modelSource != null) "Source: ${a.modelSource}" else "Models are discovered from the installed CLI on the Mac.")
+                        append(if (a?.modelSource != null) "Source: ${a.modelSource}" else "Models are discovered from the installed CLI on this device.")
                         (a?.modelRefreshedAt ?: ui.modelsRefreshedAt)?.let { append(" · updated ${relativeTime(it)}") }
                     },
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -132,7 +132,7 @@ fun NewSessionScreen(ui: NewSessionUi, actions: NewSessionActions, modifier: Mod
                 a?.error?.takeIf { a.available }?.let { Banner("Model discovery: $it", Modifier.padding(vertical = 6.dp), isError = false) }
                 Column(Modifier.selectableGroup().padding(top = 4.dp)) {
                     ModelRow(
-                        "Agent default", ui.defaultModel?.let { "Mac default: $it" } ?: "Whatever ${Agents.displayName(ui.agent)} uses by default",
+                        "Agent default", ui.defaultModel?.let { "Device default: $it" } ?: "Whatever ${Agents.displayName(ui.agent)} uses by default",
                         ui.choice == ModelChoice.AgentDefault,
                     ) { actions.onChoice(ModelChoice.AgentDefault) }
                     a?.models.orEmpty().forEach { m ->
@@ -150,7 +150,7 @@ fun NewSessionScreen(ui: NewSessionUi, actions: NewSessionActions, modifier: Mod
                     )
                 }
 
-                SectionTitle("Folder on the Mac")
+                SectionTitle("Folder on this device")
                 OutlinedTextField(
                     value = ui.cwd, onValueChange = actions.onCwd, singleLine = true,
                     label = { Text("Working directory") }, modifier = Modifier.fillMaxWidth(),
