@@ -5,6 +5,8 @@ A native Android app and mobile web dashboard for checking and steering Claude C
 ## Features
 
 - Project folders with expandable real subagents, each with its own task, messages, tool activity and status.
+- Needs you activity filtering and per-Mac pinned chats for finding conversations quickly.
+- Readable assistant replies with copyable code and quick replies that prepare an editable draft.
 - Follow-up messages to the same managed terminal session, with interruption enabled by default; stop controls and permission approvals.
 - New chats with models discovered from your installed CLIs, plus exact custom model IDs.
 - Private HTTPS through Tailscale, device pairing and revocation.
@@ -53,7 +55,7 @@ The shell block also defines the shortcut `ad`: plain `ad` opens the session men
 
 ## Android APK
 
-Version 0.2.0 adds a searchable Open chats view, collapsible project folders, clearer child-agent groups and a full-width reply composer. See [the Android usability changes](docs/ANDROID-UX.md).
+Version 0.2.3 adds Needs you filtering, pinned chats, readable replies and editable quick replies. See [the mobile workflow review](docs/COMPETITOR-UX.md) and [the earlier usability changes](docs/ANDROID-UX.md). Newer versions show an update popup when you open the app; download and install through Settings → App updates.
 
 Requirements: JDK 21 and Android SDK 36. Set `JAVA_HOME` and your SDK location (`ANDROID_HOME` or an untracked `android/local.properties`), then:
 
@@ -62,11 +64,11 @@ cd android
 ./gradlew assembleDebug
 ```
 
-The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk`. To make it available through your dashboard, copy a versioned, signed APK into the repository's `outputs/` directory:
+The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk`. To make it available through your dashboard, copy a versioned, signed APK into the helper’s configured APK directory (default: `outputs/`):
 
 ```sh
 mkdir -p outputs
-cp android/app/build/outputs/apk/debug/app-debug.apk outputs/agent-deck-0.2.2.apk
+cp android/app/build/outputs/apk/debug/app-debug.apk outputs/agent-deck-0.2.3.apk
 ```
 
 Run those copy commands from the repository root. `/apk` excludes unsigned and push-unconfigured builds. Release builds are unsigned until you configure your own signing key.

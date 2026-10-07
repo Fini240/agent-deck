@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import de.finn.agentdeck.AppGraph
 import de.finn.agentdeck.BuildConfig
+import de.finn.agentdeck.data.PinnedChats
 import de.finn.agentdeck.core.api.AgentDeckClient
 import de.finn.agentdeck.core.api.ApiException
 import de.finn.agentdeck.core.api.PairingLink
@@ -40,6 +41,7 @@ data class NavState(val screen: Screen, val selectedId: String? = null)
 
 class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPreferences) : ViewModel() {
     private val repo = graph.repository
+    private val pins = PinnedChats(uiPrefs)
 
     private val _nav = MutableStateFlow(NavState(if (graph.credentials.current() == null) Screen.PAIRING else Screen.HOME))
     val nav: StateFlow<NavState> = _nav.asStateFlow()
@@ -52,14 +54,17 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
         val scope: BrowserScope,
         val collapsedFolders: Set<String>,
         val query: String = "",
+        val pinnedOnly: Boolean = false,
+        val pinRevision: Int = 0,
     )
     private val listPrefs = MutableStateFlow(
         ListPrefs(
             uiPrefs.getString("filter", "all")?.takeIf { it == "all" || it == Agents.CLAUDE || it == Agents.CODEX } ?: "all",
-            if (uiPrefs.getString("activity", "ALL") == "ACTIVE") ActivityFilter.ACTIVE else ActivityFilter.ALL,
+            ActivityFilter.entries.firstOrNull { it.name == uiPrefs.getString("activity", "ALL") } ?: ActivityFilter.ALL,
             uiPrefs.getStringSet("expanded", emptySet()).orEmpty().toSet(),
             if (uiPrefs.getString("scope", "OPEN") == "ALL") BrowserScope.ALL else BrowserScope.OPEN,
             uiPrefs.getStringSet("collapsedFolders", emptySet()).orEmpty().toSet(),
+            pinnedOnly = uiPrefs.getBoolean("pinnedOnly", false),
         ),
     )
 
@@ -69,6 +74,7 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
             loaded = s.loaded, loading = s.loading, error = s.error, serverName = cr?.serverName.orEmpty(),
             selectedId = n.selectedId, now = Instant.now(),
             scope = p.scope, query = p.query, collapsedFolders = p.collapsedFolders,
+            pinned = pins.get(cr?.server?.value), pinnedOnly = p.pinnedOnly,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionListUi())
 
@@ -102,6 +108,11 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
 
     fun setFilter(f: String) = savePrefs(listPrefs.value.copy(filter = f))
     fun setActivity(a: ActivityFilter) = savePrefs(listPrefs.value.copy(activity = a))
+    fun setPinnedOnly(value: Boolean) = savePrefs(listPrefs.value.copy(pinnedOnly = value))
+    fun togglePin(id: String) {
+        pins.toggle(graph.credentials.current()?.server?.value, id)
+        listPrefs.update { it.copy(pinRevision = it.pinRevision + 1) }
+    }
     fun setScope(s: BrowserScope) = savePrefs(listPrefs.value.copy(scope = s))
     fun toggleExpanded(id: String) {
         val cur = listPrefs.value.expanded
@@ -116,7 +127,7 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
     fun setQuery(q: String) = listPrefs.update { it.copy(query = q.take(200)) }
 
     /** Provider and activity filters back to all; scope, search and disclosure stay. */
-    fun clearFilters() = savePrefs(listPrefs.value.copy(filter = "all", activity = ActivityFilter.ALL))
+    fun clearFilters() = savePrefs(listPrefs.value.copy(filter = "all", activity = ActivityFilter.ALL, pinnedOnly = false))
 
     private fun savePrefs(p: ListPrefs) {
         listPrefs.value = p
@@ -126,6 +137,7 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
             putStringSet("expanded", p.expanded)
             putString("scope", p.scope.name)
             putStringSet("collapsedFolders", p.collapsedFolders)
+            putBoolean("pinnedOnly", p.pinnedOnly)
         }
     }
 

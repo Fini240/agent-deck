@@ -20,7 +20,13 @@ data class ProjectGroup(
     val sessionCount: Int get() = entries.sumOf { 1 + it.totalChildren }
 }
 
-enum class ActivityFilter { ALL, ACTIVE }
+enum class ActivityFilter { ALL, ACTIVE, ATTENTION }
+
+fun ActivityFilter.matches(s: Session): Boolean = when (this) {
+    ActivityFilter.ALL -> true
+    ActivityFilter.ACTIVE -> s.isActive
+    ActivityFilter.ATTENTION -> s.status == SessionStatus.NEEDS_INPUT || s.status == SessionStatus.ERROR
+}
 
 object SessionGrouping {
     /**
@@ -57,9 +63,9 @@ object SessionGrouping {
         val entries = tops.map { top ->
             val all = descendants(top.id, 1, mutableSetOf(top.id))
             val active = all.count { it.session.isActive }
-            val shown = if (filter == ActivityFilter.ACTIVE) all.filter { it.session.isActive } else all
+            val shown = all.filter { filter.matches(it.session) }
             ParentEntry(top, shown, all.size, active)
-        }.filter { filter == ActivityFilter.ALL || it.session.isActive || it.activeChildren > 0 }
+        }.filter { filter.matches(it.session) || it.children.isNotEmpty() }
 
         return entries.groupBy { it.session.projectKey }
             .map { (key, list) -> ProjectGroup(key, label(key), list.sortedWith(compareBy(ORDER) { it.session })) }

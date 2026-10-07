@@ -49,6 +49,8 @@ class SessionBrowserUiTest {
                     onSelect = { ui = ui.copy(selectedId = it) },
                     onRefresh = {}, onNew = {}, onSettings = {}, onRePair = {},
                     onScope = { ui = ui.copy(scope = it) },
+                    onPin = { id -> ui = ui.copy(pinned = if (id in ui.pinned) ui.pinned - id else ui.pinned + id) },
+                    onPinnedOnly = { ui = ui.copy(pinnedOnly = it) },
                     onQuery = { ui = ui.copy(query = it) },
                     onToggleFolder = { k -> ui = ui.copy(collapsedFolders = if (k in ui.collapsedFolders) ui.collapsedFolders - k else ui.collapsedFolders + k) },
                 )
@@ -57,6 +59,32 @@ class SessionBrowserUiTest {
     }
 
     private fun gone(text: String) = assertTrue("'$text' should not be listed", compose.onAllNodesWithText(text).fetchSemanticsNodes().isEmpty())
+
+    @Test
+    fun pinningDoesNotOpenChatAndPinnedViewCanBeRemoved() {
+        show()
+        compose.onNodeWithContentDescription("Pin chat: Agent Deck build").performClick()
+        assertTrue(ui.pinned.contains(Fixtures.claudeParent.id))
+        assertEquals(null, ui.selectedId)
+        compose.onNodeWithText("Pinned").performClick()
+        compose.onNodeWithText("Agent Deck build").assertIsDisplayed()
+        gone("Szillus copy edits")
+        compose.onNodeWithContentDescription("Unpin chat: Agent Deck build").performClick()
+        compose.onNodeWithText("No pinned chats in this view. Tap a chat’s star to keep it handy.").assertIsDisplayed()
+        compose.onNodeWithText("Pinned").performClick()
+        compose.onNodeWithText("Szillus copy edits").assertIsDisplayed()
+    }
+
+    @Test
+    fun attentionFilterIsAvailableAndReturnsToAllActivity() {
+        show()
+        compose.onNodeWithText("All activity").performClick()
+        compose.onNodeWithText("Needs you").performClick()
+        assertEquals(de.finn.agentdeck.core.model.ActivityFilter.ATTENTION, ui.activity)
+        compose.onNodeWithText("Needs you").performClick()
+        compose.onNodeWithText("All activity").performClick()
+        assertEquals(de.finn.agentdeck.core.model.ActivityFilter.ALL, ui.activity)
+    }
 
     @Test
     fun openIsDefaultAndHistoryIsOneTapAway() {

@@ -9,10 +9,14 @@ data class BrowserQuery(
     val provider: String = "all",
     val activity: ActivityFilter = ActivityFilter.ALL,
     val search: String = "",
+    val pinned: Set<String> = emptySet(),
+    val pinnedOnly: Boolean = false,
 ) {
     val needle: String get() = search.trim().lowercase()
     val searching: Boolean get() = needle.isNotEmpty()
-    val filtersSet: Boolean get() = provider != "all" || activity != ActivityFilter.ALL
+    val filtersSet: Boolean get() = provider != "all" || activity != ActivityFilter.ALL || pinnedOnly
+    /** Focused views reveal matches without changing saved folder or child disclosure. */
+    val revealing: Boolean get() = searching || pinnedOnly || activity == ActivityFilter.ATTENTION
 }
 
 /** One line of the flattened browser list, in display order. */
@@ -30,9 +34,9 @@ data class FolderRow(
     val childAgents: Int,
     /** Of those, how many are working or need input. */
     val active: Int,
-    /** True when the folder's rows are hidden (the saved collapse applies and no search overrides it). */
+    /** True when the folder's rows are hidden (the saved collapse applies and no focused view overrides it). */
     val collapsed: Boolean,
-    /** True when a search temporarily forces the folder open regardless of the saved state. */
+    /** True when a focused view temporarily forces the folder open regardless of the saved state. */
     val revealedBySearch: Boolean,
 ) : BrowserRow {
     override val key: String get() = "g:" + folder
@@ -45,7 +49,7 @@ data class ChatRow(
     val activeChildren: Int,
     /** Saved disclosure state. */
     val expanded: Boolean,
-    /** Children are listed because a search matched them, independent of [expanded]. */
+    /** Children are listed because a focused view matched them, independent of [expanded]. */
     val revealedBySearch: Boolean,
     /** Listed only as the real parent of a matching child; the chat itself is outside the scope or search. */
     val context: Boolean,
@@ -134,8 +138,17 @@ object SessionBrowser {
             Node(s, depth, childrenOf[s.id].orEmpty().sortedWith(SessionGrouping.ORDER).filter { seen.add(it.id) }.map { build(it, depth + 1, seen) })
 
         fun providerOk(root: Session) = query.provider == "all" || root.agent == query.provider
-        fun activityOk(s: Session) = query.activity == ActivityFilter.ALL || s.isActive
+        fun activityOk(s: Session) = query.activity.matches(s)
         fun scopeOk(s: Session) = query.scope == BrowserScope.ALL || isOpen(s)
+        fun pinOk(s: Session): Boolean {
+            if (!query.pinnedOnly) return true
+            var id: String? = s.id
+            while (id != null) {
+                if (id in query.pinned) return true
+                id = links[id]
+            }
+            return false
+        }
 
         val roots = sessions.filter { it.id !in links }.map { build(it, 0, mutableSetOf(it.id)) }
 
@@ -144,7 +157,7 @@ object SessionBrowser {
         fun hit(n: Node): Boolean {
             val s = n.session
             if (!matches(s, needle)) return false
-            val filters = providerOk(s) && activityOk(s)
+            val filters = providerOk(s) && activityOk(s) && pinOk(s)
             val scope = scopeOk(s)
             if (filters && !scope) hiddenByScope++
             if (scope && !filters) hiddenByFilters++
@@ -170,7 +183,7 @@ object SessionBrowser {
             val childHits = descendants.filter { hits.getValue(it.session.id) }
 
             val isExpanded = root.session.id in expanded
-            val reveal = query.searching && childHits.isNotEmpty()
+            val reveal = query.revealing && childHits.isNotEmpty()
             val listed = if (reveal || isExpanded) {
                 descendants.filter { hits.getValue(it.session.id) || hasHitBelow(it) }
                     .map { AgentRow(it.session, it.depth, context = !hits.getValue(it.session.id)) }
@@ -195,16 +208,16 @@ object SessionBrowser {
                     .thenByDescending { (_, list) -> list.maxOf { it.row.session.updatedAt.orEmpty() } },
             )
         folders.forEach { (key, list) ->
-            val sorted = list.sortedWith(compareBy<Built> { rank(it.row) }.thenByDescending { it.row.session.updatedAt.orEmpty() })
+            val sorted = list.sortedWith(compareBy<Built> { rank(it.row) }.thenBy { if (it.row.session.id in query.pinned) 0 else 1 }.thenByDescending { it.row.session.updatedAt.orEmpty() })
             val savedCollapsed = key in collapsedFolders
-            val revealed = savedCollapsed && query.searching
+            val revealed = savedCollapsed && query.revealing
             rows += FolderRow(
                 folder = key, label = SessionGrouping.label(key),
                 chats = sorted.count { it.hit }, childAgents = sorted.sumOf { it.row.childCount },
                 active = sorted.sumOf { (if (it.activeHit) 1 else 0) + it.row.activeChildren },
-                collapsed = savedCollapsed && !query.searching, revealedBySearch = revealed,
+                collapsed = savedCollapsed && !query.revealing, revealedBySearch = revealed,
             )
-            if (!savedCollapsed || query.searching) {
+            if (!savedCollapsed || query.revealing) {
                 sorted.forEach { b ->
                     rows += b.row
                     rows += b.children

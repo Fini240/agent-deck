@@ -137,6 +137,21 @@ class ScreenshotTest {
         }
     }
 
+    private fun richDetail() = parentDetail().copy(draft = "", messages = listOf(
+        de.finn.agentdeck.core.model.Message("formatted", "assistant", "## Build progress\n\n- **Android:** tests passed\n- **Mac helper:** unchanged\n\nRun `ad` to pick your chat.\n\n```shell\nad pair\n```", "2026-10-07T09:11:50Z")))
+    @Test fun needsYouCover() = shot("needs_you", Width.COVER, false) {
+        List(listUi(activity = ActivityFilter.ATTENTION).copy(expanded = emptySet(), collapsedFolders = Fixtures.sessions.map { it.projectKey }.toSet()))
+    }
+    @Test fun pinnedInnerDark() = shot("pinned", Width.INNER, true) {
+        List(listUi().copy(pinned = setOf(Fixtures.claudeParent.id), pinnedOnly = true))
+    }
+    @Test fun formattedCover() = shot("formatted_chat", Width.COVER, false) { SessionDetailPane(richDetail(), DetailActions(onBack = {})) }
+    @Test fun formattedLargeText() = shot("formatted_large_text", Width.SMALL, true, fontScale = 2f) { SessionDetailPane(richDetail(), DetailActions(onBack = {})) }
+    @Test fun formattedWide() = shot("formatted_chat", Width.WIDE, false) {
+        AdaptiveHome(wide = true, totalWidth = androidx.compose.ui.unit.Dp(1440f), showDetail = true,
+            list = { List(listUi()) }, detail = { SessionDetailPane(richDetail(), DetailActions()) })
+    }
+
     // ---- Grouped list -------------------------------------------------------------------
     @Test fun listCoverLight() = shot("list_grouped", Width.COVER, false) { Home(null, null) }
     @Test fun listCoverDark() = shot("list_grouped", Width.COVER, true) { Home(null, null) }

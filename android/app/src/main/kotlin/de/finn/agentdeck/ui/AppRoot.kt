@@ -129,6 +129,7 @@ fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPer
                                     onSelect = { vm.select(it) }, onRefresh = { vm.refresh() }, onNew = { vm.open(Screen.NEW_SESSION) },
                                     onSettings = { vm.open(Screen.SETTINGS) }, onRePair = { vm.open(Screen.PAIRING) },
                                     onScope = vm::setScope, onQuery = vm::setQuery, onToggleFolder = vm::toggleFolder, onClearFilters = vm::clearFilters,
+                                    onPin = vm::togglePin, onPinnedOnly = vm::setPinnedOnly,
                                 )
                             },
                             detail = { nav.selectedId?.let { DetailRoute(graph, it, if (wide) null else ({ vm.back(wide) }), onOpen = { id -> vm.select(id) }) } },

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
@@ -108,10 +109,15 @@ data class SessionListUi(
     /** Transient search text; matched trimmed and case-insensitive. */
     val query: String = "",
     val collapsedFolders: Set<String> = emptySet(),
+    val pinned: Set<String> = emptySet(),
+    val pinnedOnly: Boolean = false,
 ) {
     val groups: List<ProjectGroup> get() = SessionGrouping.group(sessions, activity, filter)
-    val browserQuery: BrowserQuery get() = BrowserQuery(scope, filter, activity, query)
+    val browserQuery: BrowserQuery get() = BrowserQuery(scope, filter, activity, query, pinned, pinnedOnly)
     val browser: BrowserResult by lazy { SessionBrowser.browse(sessions, browserQuery, expanded, collapsedFolders) }
+    val attentionCount: Int by lazy {
+        SessionBrowser.browse(sessions, browserQuery.copy(activity = ActivityFilter.ATTENTION)).let { it.chats + it.childAgents }
+    }
 }
 
 /** Room under the last row so the New chat button never covers it. */
@@ -134,6 +140,8 @@ fun SessionListPane(
     onQuery: (String) -> Unit = {},
     onToggleFolder: (String) -> Unit = {},
     onClearFilters: () -> Unit = { onFilter("all"); onActivity(ActivityFilter.ALL) },
+    onPin: (String) -> Unit = {},
+    onPinnedOnly: (Boolean) -> Unit = {},
 ) {
     val result = ui.browser
     val focus = LocalFocusManager.current
@@ -158,7 +166,7 @@ fun SessionListPane(
             )
             ConnectionLine(ui.connection, onRePair)
             SearchField(ui.query, onQuery)
-            FilterChips(ui, onScope, onFilter, onActivity)
+            FilterChips(ui, onScope, onFilter, onActivity, onPinnedOnly)
             if (ui.error != null && ui.connection !is Connection.Unauthorized) {
                 Banner(ui.error, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), actionLabel = "Retry", onAction = onRefresh)
             }
@@ -168,11 +176,11 @@ fun SessionListPane(
                     ui.loaded && ui.sessions.isEmpty() -> EmptyState("No chats on this Mac yet. Start Claude Code or Codex in a terminal, or tap New chat to start one here.")
                     ui.loaded && result.isEmpty -> NoResults(ui, result, onQuery, onScope, onClearFilters)
                     else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = FabClearance)) {
-                        item(key = "summary") { Summary(ui, result, onScope) }
+                        item(key = "summary") { Summary(ui, result, onScope, onActivity) }
                         result.rows.forEach { row ->
                             when (row) {
                                 is FolderRow -> item(key = row.key) {
-                                    FolderHeader(row, searching = ui.browserQuery.searching, onToggle = { onToggleFolder(row.folder) })
+                                    FolderHeader(row, searching = ui.browserQuery.revealing, onToggle = { onToggleFolder(row.folder) })
                                 }
                                 is ChatRow -> {
                                     item(key = row.key) {
@@ -182,6 +190,7 @@ fun SessionListPane(
                                             childCount = row.childCount, activeChildren = row.activeChildren,
                                             expanded = row.expanded || row.revealedBySearch, onToggle = { onToggleExpand(row.session.id) },
                                             context = row.context, revealedBySearch = row.revealedBySearch, scope = ui.scope,
+                                            pinned = row.session.id in ui.pinned, onPin = { onPin(row.session.id) },
                                         )
                                     }
                                 }
@@ -227,7 +236,8 @@ private fun SearchField(query: String, onQuery: (String) -> Unit) {
 
 /** Wraps instead of scrolling sideways, so nothing is clipped at large text sizes. */
 @Composable
-private fun FilterChips(ui: SessionListUi, onScope: (BrowserScope) -> Unit, onFilter: (String) -> Unit, onActivity: (ActivityFilter) -> Unit) {
+private fun FilterChips(ui: SessionListUi, onScope: (BrowserScope) -> Unit, onFilter: (String) -> Unit, onActivity: (ActivityFilter) -> Unit, onPinnedOnly: (Boolean) -> Unit) {
+    var activityMenu by remember { mutableStateOf(false) }
     var providerMenu by remember { mutableStateOf(false) }
     FlowRow(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -247,16 +257,30 @@ private fun FilterChips(ui: SessionListUi, onScope: (BrowserScope) -> Unit, onFi
                 }
             }
         }
-        // Kept for people who saved it; shown only while set so it can be turned off.
-        if (ui.activity == ActivityFilter.ACTIVE) {
+        Box {
             FilterChip(
-                selected = true, onClick = { onActivity(ActivityFilter.ALL) },
-                label = { Text("Working or waiting only") },
-                trailingIcon = { Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                modifier = Modifier.semantics { contentDescription = "Remove filter: working or waiting only" },
+                selected = ui.activity != ActivityFilter.ALL, onClick = { activityMenu = true },
+                label = { Text(activityLabel(ui.activity)) },
+                trailingIcon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
             )
+            DropdownMenu(expanded = activityMenu, onDismissRequest = { activityMenu = false }) {
+                ActivityFilter.entries.forEach { activity ->
+                    DropdownMenuItem(text = { Text(activityLabel(activity)) }, onClick = { onActivity(activity); activityMenu = false })
+                }
+            }
         }
+        FilterChip(
+            selected = ui.pinnedOnly, onClick = { onPinnedOnly(!ui.pinnedOnly) },
+            label = { Text("Pinned") },
+            leadingIcon = { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        )
     }
+}
+
+private fun activityLabel(activity: ActivityFilter): String = when (activity) {
+    ActivityFilter.ALL -> "All activity"
+    ActivityFilter.ACTIVE -> "Working or waiting"
+    ActivityFilter.ATTENTION -> "Needs you"
 }
 
 private fun plural(n: Int, one: String, many: String) = "$n ${if (n == 1) one else many}"
@@ -265,7 +289,7 @@ private fun countLabel(chats: Int, agents: Int): String =
     listOfNotNull(if (chats > 0 || agents == 0) plural(chats, "chat", "chats") else null, if (agents > 0) plural(agents, "child agent", "child agents") else null).joinToString(" · ")
 
 @Composable
-private fun Summary(ui: SessionListUi, r: BrowserResult, onScope: (BrowserScope) -> Unit) {
+private fun Summary(ui: SessionListUi, r: BrowserResult, onScope: (BrowserScope) -> Unit, onActivity: (ActivityFilter) -> Unit) {
     val what = when {
         ui.browserQuery.searching -> "Matches: "
         ui.scope == BrowserScope.OPEN -> "Open: "
@@ -282,6 +306,9 @@ private fun Summary(ui: SessionListUi, r: BrowserResult, onScope: (BrowserScope)
             style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(vertical = 8.dp),
         )
+        if (ui.activity != ActivityFilter.ATTENTION && ui.attentionCount > 0) {
+            TextButton(onClick = { onActivity(ActivityFilter.ATTENTION) }) { Text("${ui.attentionCount} need you") }
+        }
         if (ui.scope == BrowserScope.OPEN && r.hiddenByScope > 0) {
             TextButton(onClick = { onScope(BrowserScope.ALL) }) { Text("${r.hiddenByScope} more in history") }
         }
@@ -293,6 +320,8 @@ private fun NoResults(ui: SessionListUi, r: BrowserResult, onQuery: (String) -> 
     val q = ui.browserQuery
     val text = when {
         q.searching -> "Nothing matches “${ui.query.trim()}”" + if (ui.scope == BrowserScope.OPEN) " in open chats." else "."
+        ui.activity == ActivityFilter.ATTENTION -> "Nothing needs your attention in this view. Waiting requests and errors appear here."
+        ui.pinnedOnly -> "No pinned chats in this view. Tap a chat’s star to keep it handy."
         ui.scope == BrowserScope.OPEN -> "No open chats right now. Nothing is running, waiting for input or accepting replies."
         else -> "No chats match these filters."
     }
@@ -334,7 +363,7 @@ private fun FolderHeader(row: FolderRow, searching: Boolean, onToggle: () -> Uni
                 heading()
                 contentDescription = "Folder ${row.label}, ${shortPath(row.folder)}, $counts"
                 stateDescription = when {
-                    row.revealedBySearch -> "Showing matches"
+                    row.revealedBySearch -> "Showing filter matches"
                     open -> "Expanded"
                     else -> "Collapsed"
                 }
@@ -467,6 +496,8 @@ fun SessionRow(
     context: Boolean = false,
     revealedBySearch: Boolean = false,
     scope: BrowserScope = BrowserScope.ALL,
+    pinned: Boolean = false,
+    onPin: (() -> Unit)? = null,
 ) {
     val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -505,6 +536,13 @@ fun SessionRow(
                         rowKind(s, context), style = MaterialTheme.typography.labelMedium, color = muted,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
+                    if (onPin != null) {
+                        IconButton(onClick = onPin, modifier = Modifier.size(48.dp)) {
+                            Icon(if (pinned) Icons.Default.Star else UnpinnedChatIcon,
+                                contentDescription = (if (pinned) "Unpin chat: " else "Pin chat: ") + s.title,
+                                tint = if (pinned) MaterialTheme.colorScheme.primary else muted)
+                        }
+                    }
                     if (s.unread > 0) {
                         Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(10.dp)) {
                             Text("${s.unread}", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp))
@@ -528,7 +566,7 @@ fun SessionRow(
             Modifier.fillMaxWidth()
                 .then(
                     if (revealedBySearch) {
-                        Modifier.semantics { stateDescription = "Shown by search" }
+                        Modifier.semantics { stateDescription = "Shown by focused view" }
                     } else {
                         Modifier
                             .clickable(role = Role.Button, onClickLabel = if (expanded) "Hide child agents" else "Show child agents", onClick = onToggle)

@@ -44,6 +44,52 @@ class SessionBrowserTest {
     private fun BrowserResult.agent(id: String) = rows.filterIsInstance<AgentRow>().single { it.session.id == id }
 
     @Test
+    fun pinnedParentKeepsItsOpenAgentsReachable() {
+        val list = listOf(s("parent", live = true), s("child", parent = "parent", status = SessionStatus.WORKING),
+            s("finished", parent = "parent", status = SessionStatus.OFFLINE), s("other", live = true))
+        val r = SessionBrowser.browse(list, BrowserQuery(pinned = setOf("parent"), pinnedOnly = true))
+        assertEquals(listOf("parent", "child"), r.ids())
+        assertEquals(1, r.childAgents)
+        assertEquals(1, r.hiddenByScope)
+    }
+
+    @Test
+    fun attentionRevealsWaitingDescendantsAndFoldersWithoutChangingSavedState() {
+        val list = listOf(s("parent", live = true), s("working", parent = "parent", status = SessionStatus.WORKING),
+            s("waiting", parent = "parent", status = SessionStatus.NEEDS_INPUT),
+            s("old-error", status = SessionStatus.ERROR), s("live-error", status = SessionStatus.ERROR, live = true))
+        val collapsed = setOf("/p")
+        val r = SessionBrowser.browse(list, BrowserQuery(activity = ActivityFilter.ATTENTION), collapsedFolders = collapsed)
+        assertEquals(setOf("parent", "waiting", "live-error"), r.ids().toSet())
+        assertTrue(r.chat("parent").context)
+        assertTrue(r.chat("parent").revealedBySearch)
+        assertFalse(r.rows.filterIsInstance<FolderRow>().single().collapsed)
+        assertEquals(setOf("/p"), collapsed)
+        assertEquals(1, r.hiddenByScope)
+        assertEquals(emptyList<String>(), SessionBrowser.browse(list, collapsedFolders = collapsed).ids())
+    }
+
+    @Test
+    fun pinnedViewKeepsRealParentsAndHonorsScopeProviderAndSearch() {
+        val list = listOf(s("parent", live = true), s("child", parent = "parent", live = true),
+            s("history", status = SessionStatus.OFFLINE), s("other", agent = "codex", live = true))
+        val pins = setOf("child", "history", "other", "missing")
+        val query = BrowserQuery(pinned = pins, pinnedOnly = true, provider = "claude")
+        val r = SessionBrowser.browse(list, query, collapsedFolders = setOf("/p"))
+        assertEquals(listOf("parent", "child"), r.ids())
+        assertTrue(r.chat("parent").context)
+        assertEquals(1, r.hiddenByScope)
+        assertTrue(SessionBrowser.browse(list, query.copy(search = "unmatched")).isEmpty)
+        assertEquals(setOf("parent", "child", "history"), SessionBrowser.browse(list, query.copy(scope = BrowserScope.ALL)).ids().toSet())
+    }
+
+    @Test
+    fun pinsDoNotDisplaceWaitingChatsButLeadWithinAnActivityRank() {
+        val list = listOf(s("normal", live = true), s("pinned", live = true), s("waiting", status = SessionStatus.NEEDS_INPUT))
+        assertEquals(listOf("waiting", "pinned", "normal"), SessionBrowser.browse(list, BrowserQuery(pinned = setOf("pinned"))).ids())
+    }
+
+    @Test
     fun openIncludesIdleLiveUnknownLiveAndSendableButNotHistory() {
         assertTrue(SessionBrowser.isOpen(s("a", SessionStatus.IDLE, live = true)))
         assertTrue(SessionBrowser.isOpen(s("b", SessionStatus.UNKNOWN, live = true)))
