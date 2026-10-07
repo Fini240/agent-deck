@@ -13,6 +13,7 @@ import de.finn.agentdeck.core.api.PairingLink
 import de.finn.agentdeck.core.api.ServerUrl
 import de.finn.agentdeck.core.model.ActivityFilter
 import de.finn.agentdeck.core.model.Agents
+import de.finn.agentdeck.core.model.BrowserScope
 import de.finn.agentdeck.core.model.ModelsResponse
 import de.finn.agentdeck.core.model.PairRequest
 import de.finn.agentdeck.core.model.SettingsPatch
@@ -43,12 +44,22 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
     private val _nav = MutableStateFlow(NavState(if (graph.credentials.current() == null) Screen.PAIRING else Screen.HOME))
     val nav: StateFlow<NavState> = _nav.asStateFlow()
 
-    private data class ListPrefs(val filter: String, val activity: ActivityFilter, val expanded: Set<String>)
+    /** Scope, filters and folder/child disclosure persist; the search text is transient (survives navigation and rotation, not a restart). */
+    private data class ListPrefs(
+        val filter: String,
+        val activity: ActivityFilter,
+        val expanded: Set<String>,
+        val scope: BrowserScope,
+        val collapsedFolders: Set<String>,
+        val query: String = "",
+    )
     private val listPrefs = MutableStateFlow(
         ListPrefs(
-            uiPrefs.getString("filter", "all") ?: "all",
+            uiPrefs.getString("filter", "all")?.takeIf { it == "all" || it == Agents.CLAUDE || it == Agents.CODEX } ?: "all",
             if (uiPrefs.getString("activity", "ALL") == "ACTIVE") ActivityFilter.ACTIVE else ActivityFilter.ALL,
             uiPrefs.getStringSet("expanded", emptySet()).orEmpty().toSet(),
+            if (uiPrefs.getString("scope", "OPEN") == "ALL") BrowserScope.ALL else BrowserScope.OPEN,
+            uiPrefs.getStringSet("collapsedFolders", emptySet()).orEmpty().toSet(),
         ),
     )
 
@@ -57,6 +68,7 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
             sessions = s.sessions, filter = p.filter, activity = p.activity, expanded = p.expanded, connection = c,
             loaded = s.loaded, loading = s.loading, error = s.error, serverName = cr?.serverName.orEmpty(),
             selectedId = n.selectedId, now = Instant.now(),
+            scope = p.scope, query = p.query, collapsedFolders = p.collapsedFolders,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionListUi())
 
@@ -90,10 +102,21 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
 
     fun setFilter(f: String) = savePrefs(listPrefs.value.copy(filter = f))
     fun setActivity(a: ActivityFilter) = savePrefs(listPrefs.value.copy(activity = a))
+    fun setScope(s: BrowserScope) = savePrefs(listPrefs.value.copy(scope = s))
     fun toggleExpanded(id: String) {
         val cur = listPrefs.value.expanded
         savePrefs(listPrefs.value.copy(expanded = if (id in cur) cur - id else (cur + id).toList().takeLast(200).toSet()))
     }
+    fun toggleFolder(key: String) {
+        val cur = listPrefs.value.collapsedFolders
+        savePrefs(listPrefs.value.copy(collapsedFolders = if (key in cur) cur - key else (cur + key).toList().takeLast(200).toSet()))
+    }
+
+    /** Search text is not written to disk. */
+    fun setQuery(q: String) = listPrefs.update { it.copy(query = q.take(200)) }
+
+    /** Provider and activity filters back to all; scope, search and disclosure stay. */
+    fun clearFilters() = savePrefs(listPrefs.value.copy(filter = "all", activity = ActivityFilter.ALL))
 
     private fun savePrefs(p: ListPrefs) {
         listPrefs.value = p
@@ -101,6 +124,8 @@ class MainViewModel(private val graph: AppGraph, private val uiPrefs: SharedPref
             putString("filter", p.filter)
             putString("activity", p.activity.name)
             putStringSet("expanded", p.expanded)
+            putString("scope", p.scope.name)
+            putStringSet("collapsedFolders", p.collapsedFolders)
         }
     }
 

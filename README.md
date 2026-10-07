@@ -52,6 +52,8 @@ The shell block also defines the shortcut `ad`: plain `ad` opens the session men
 
 ## Android APK
 
+Version 0.2.0 adds a searchable Open chats view, collapsible project folders, clearer child-agent groups and a full-width reply composer. See [the Android usability changes](docs/ANDROID-UX.md).
+
 Requirements: JDK 21 and Android SDK 36. Set `JAVA_HOME` and your SDK location (`ANDROID_HOME` or an untracked `android/local.properties`), then:
 
 ```sh

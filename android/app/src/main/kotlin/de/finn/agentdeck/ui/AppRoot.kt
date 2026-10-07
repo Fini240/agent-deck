@@ -51,7 +51,8 @@ fun AdaptiveHome(
     detail: @Composable () -> Unit,
 ) {
     if (wide) {
-        val listWidth = (totalWidth * 0.38f).coerceIn(340.dp, 440.dp)
+        // 600dp inner screen: 320 list + 280 detail; 768: 320 + 448; 1440: 420 + 1020.
+        val listWidth = (totalWidth * 0.4f).coerceIn(320.dp, 420.dp)
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.width(listWidth).fillMaxHeight()) { list() }
             VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -60,7 +61,7 @@ fun AdaptiveHome(
                     detail()
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Select a session or agent to inspect it.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
+                        Text("Select a chat to read and reply, or an agent to inspect it.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
                     }
                 }
             }
@@ -113,6 +114,7 @@ fun AppRoot(graph: AppGraph, vm: MainViewModel, onScan: () -> Unit, onRequestPer
                             list, onFilter = vm::setFilter, onActivity = vm::setActivity, onToggleExpand = vm::toggleExpanded,
                             onSelect = { vm.select(it) }, onRefresh = { vm.refresh() }, onNew = { vm.open(Screen.NEW_SESSION) },
                             onSettings = { vm.open(Screen.SETTINGS) }, onRePair = { vm.open(Screen.PAIRING) },
+                            onScope = vm::setScope, onQuery = vm::setQuery, onToggleFolder = vm::toggleFolder, onClearFilters = vm::clearFilters,
                         )
                     },
                     detail = { nav.selectedId?.let { DetailRoute(graph, it, if (wide) null else ({ vm.back(wide) }), onOpen = { id -> vm.select(id) }) } },

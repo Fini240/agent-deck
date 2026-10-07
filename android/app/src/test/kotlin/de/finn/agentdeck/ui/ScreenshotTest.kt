@@ -7,12 +7,16 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.captureRoboImage
 import de.finn.agentdeck.core.model.ActivityFilter
+import de.finn.agentdeck.core.model.BrowserScope
 import de.finn.agentdeck.data.Connection
 import de.finn.agentdeck.push.PushStatus
 import de.finn.agentdeck.ui.detail.DetailActions
@@ -53,11 +57,13 @@ class ScreenshotTest {
 
     private val outDir = File(System.getProperty("user.dir"), "../../outputs/screenshots/android").canonicalFile
 
-    private fun shot(name: String, width: Width, dark: Boolean, content: @Composable () -> Unit) {
+    private fun shot(name: String, width: Width, dark: Boolean, fontScale: Float = 1f, content: @Composable () -> Unit) {
         RuntimeEnvironment.setQualifiers("${width.size}-${if (dark) "night" else "notnight"}-${width.dpi}")
         compose.setContent {
             AgentDeckTheme(darkTheme = dark) {
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { content() }
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
+                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { content() }
+                }
             }
         }
         compose.onRoot().captureRoboImage(File(outDir, "${name}_${width.label}_${if (dark) "dark" else "light"}.png").path)
@@ -67,6 +73,8 @@ class ScreenshotTest {
         COVER("cover390", "w390dp-h844dp", "xhdpi"),
         INNER("inner768", "w768dp-h900dp", "hdpi"),
         WIDE("wide1440", "w1440dp-h900dp", "mdpi"),
+        SMALL("small375", "w375dp-h812dp", "xhdpi"),
+        LANDSCAPE("landscape844", "w844dp-h390dp", "mdpi"),
     }
 
     private val expandedAll = setOf(Fixtures.claudeParent.id, "codex:01a10000-0000-7000-8000-000000000001")
@@ -104,6 +112,12 @@ class ScreenshotTest {
     @Test fun listCoverLight() = shot("list_grouped", Width.COVER, false) { Home(null, null) }
     @Test fun listCoverDark() = shot("list_grouped", Width.COVER, true) { Home(null, null) }
     @Test fun listActiveFilterCover() = shot("list_active", Width.COVER, false) { List(listUi(activity = ActivityFilter.ACTIVE)) }
+    @Test fun listAllChatsCover() = shot("list_all", Width.COVER, false) { List(listUi().copy(scope = BrowserScope.ALL)) }
+    @Test fun listSearchCover() = shot("list_search", Width.COVER, false) { List(listUi().copy(query = "model docs", expanded = emptySet())) }
+    @Test fun listSmallDark() = shot("list_small", Width.SMALL, true) { List(listUi()) }
+    @Test fun listLargeTextCover() = shot("list_large_text", Width.COVER, false, fontScale = 2f) { List(listUi()) }
+    @Test fun chatLargeTextCover() = shot("chat_large_text", Width.COVER, true, fontScale = 2f) { Home(parentDetail(), Fixtures.claudeParent.id) }
+    @Test fun homeLandscape() = shot("home", Width.LANDSCAPE, false) { Home(parentDetail(), Fixtures.claudeParent.id) }
 
     // ---- Child agent detail (read-only) ---------------------------------------------------
     @Test fun childDetailCoverLight() = shot("child_detail", Width.COVER, false) { Home(childDetail(), Fixtures.workingChild.id) }

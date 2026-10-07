@@ -7,6 +7,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onRoot
@@ -55,6 +56,7 @@ class AccessibilityTest {
             val w = with(density) { n.touchBoundsInRoot.width.toDp() }
             val h = with(density) { n.touchBoundsInRoot.height.toDp() }
             when {
+                n.touchBoundsInRoot.width <= 0f || n.touchBoundsInRoot.height <= 0f -> null // Lazy rows outside the visible viewport.
                 label.isNullOrBlank() -> "unlabelled clickable at ${n.boundsInRoot}"
                 w < 47.5.dp || h < 47.5.dp -> "'$label' touch target ${w}x$h"
                 else -> null
@@ -76,7 +78,7 @@ class AccessibilityTest {
             }
         }
         assertClickablesAccessible()
-        compose.onNodeWithText("3 agents · 1 active").performClick()
+        compose.onAllNodesWithText("1 open child agent · 1 active").onFirst().performClick()
         assertEquals(Fixtures.claudeParent.id, toggled)
         // Collapsed: child agents are not listed.
         assertEquals(0, compose.onAllNodesWithText("Search model docs", substring = false).fetchSemanticsNodes().count { it.config.getOrNull(SemanticsProperties.Text)?.joinToString() == "Search model docs" && it.parent?.config?.getOrNull(SemanticsProperties.StateDescription)?.startsWith("Child") == true })
@@ -107,7 +109,8 @@ class AccessibilityTest {
                 SessionDetailPane(DetailUi(session = Fixtures.claudeParent, messages = Fixtures.parentMessages, messagesLoaded = true, draft = "next"), DetailActions())
             }
         }
-        compose.onNodeWithText("Interrupt\n& send").assertIsDisplayed()
+        compose.onNodeWithText("Interrupts current work").assertIsDisplayed()
+        compose.onNodeWithText("Send").assertIsDisplayed()
         compose.onNodeWithText("You").assertIsDisplayed()
         compose.onNodeWithText("Tool · Agent").assertIsDisplayed()
         assertClickablesAccessible()
